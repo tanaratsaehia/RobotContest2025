@@ -1,12 +1,10 @@
+#include <WiFi.h>
+#include <esp_now.h>
 #include <BMI160Gen.h>
 #include <ESP32Servo.h>
 
 // Pin definitions
 #define TRIG_PIN   32
-#define ECHO1_PIN  39
-#define ECHO2_PIN  34
-#define ECHO3_PIN  36
-#define ECHO4_PIN  35
 
 #define BUTTON_PIN 27
 #define BUZZER_PIN 14
@@ -43,41 +41,6 @@ unsigned long lastMotorUpdate = 0;
 Servo servo_left;
 Servo servo_right;
 
-void IRAM_ATTR echo1ISR() {
-  if (digitalRead(ECHO1_PIN)) {
-    echo_start[0] = micros();
-  } else {
-    echo_end[0] = micros();
-    echo_done[0] = true;
-  }
-}
-
-void IRAM_ATTR echo2ISR() {
-  if (digitalRead(ECHO2_PIN)) {
-    echo_start[1] = micros();
-  } else {
-    echo_end[1] = micros();
-    echo_done[1] = true;
-  }
-}
-
-void IRAM_ATTR echo3ISR() {
-  if (digitalRead(ECHO3_PIN)) {
-    echo_start[2] = micros();
-  } else {
-    echo_end[2] = micros();
-    echo_done[2] = true;
-  }
-}
-
-void IRAM_ATTR echo4ISR() {
-  if (digitalRead(ECHO4_PIN)) {
-    echo_start[3] = micros();
-  } else {
-    echo_end[3] = micros();
-    echo_done[3] = true;
-  }
-}
 
 void move_motor(int action){
   if (action == 0){
@@ -92,21 +55,21 @@ void move_motor(int action){
   }else if (action == 1){
     digitalWrite(MOTOR_FRONT_A1, HIGH);
     digitalWrite(MOTOR_FRONT_A2, LOW);
-    digitalWrite(MOTOR_FRONT_B1, HIGH);
-    digitalWrite(MOTOR_FRONT_B2, LOW);
+    digitalWrite(MOTOR_FRONT_B1, LOW);
+    digitalWrite(MOTOR_FRONT_B2, HIGH);
     digitalWrite(MOTOR_BACK_A1, HIGH);
     digitalWrite(MOTOR_BACK_A2, LOW);
-    digitalWrite(MOTOR_BACK_B1, HIGH);
-    digitalWrite(MOTOR_BACK_B2, LOW);
+    digitalWrite(MOTOR_BACK_B1, LOW);
+    digitalWrite(MOTOR_BACK_B2, HIGH);
   }else if (action == 2){
     digitalWrite(MOTOR_FRONT_A1, LOW);
     digitalWrite(MOTOR_FRONT_A2, HIGH);
-    digitalWrite(MOTOR_FRONT_B1, LOW);
-    digitalWrite(MOTOR_FRONT_B2, HIGH);
+    digitalWrite(MOTOR_FRONT_B1, HIGH);
+    digitalWrite(MOTOR_FRONT_B2, LOW);
     digitalWrite(MOTOR_BACK_A1, LOW);
     digitalWrite(MOTOR_BACK_A2, HIGH);
-    digitalWrite(MOTOR_BACK_B1, LOW);
-    digitalWrite(MOTOR_BACK_B2, HIGH);
+    digitalWrite(MOTOR_BACK_B1, HIGH);
+    digitalWrite(MOTOR_BACK_B2, LOW);
   }else{
     Serial.println("Motor wrong action: " + String(action));
   }
@@ -127,14 +90,6 @@ void setup() {
 
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(BUZZER_PIN, LOW);
-
-  pinMode(TRIG_PIN, OUTPUT);
-  digitalWrite(TRIG_PIN, LOW);
-
-  pinMode(ECHO1_PIN, INPUT);
-  pinMode(ECHO2_PIN, INPUT);
-  pinMode(ECHO3_PIN, INPUT);
-  pinMode(ECHO4_PIN, INPUT);
   pinMode(BUTTON_PIN, INPUT);
 
   pinMode(MOTOR_FRONT_A1, OUTPUT);
@@ -146,10 +101,9 @@ void setup() {
   pinMode(MOTOR_BACK_B1, OUTPUT);
   pinMode(MOTOR_BACK_B2, OUTPUT);
 
-  attachInterrupt(digitalPinToInterrupt(ECHO1_PIN), echo1ISR, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ECHO2_PIN), echo2ISR, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ECHO3_PIN), echo3ISR, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(ECHO4_PIN), echo4ISR, CHANGE);
+  ultrasonic_begin();
+  delay(1000);
+  esp_now_begin();
 }
 
 void loop() {
@@ -224,4 +178,7 @@ void loop() {
   // buzzer testing
   // Serial.println("Button state: " + String(digitalRead(BUTTON_PIN)));
   digitalWrite(BUZZER_PIN, !digitalRead(BUTTON_PIN));
+
+  // test esp-now
+  test_send_message(1000);
 }
