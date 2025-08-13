@@ -13,32 +13,35 @@
 
 #define MOTOR_SPEED 90
 
-const int freq = 30000;
-const int pwmChannel = 0;
-const int resolution = 8;
-int dutyCycle = 200;
+const int ledPin = 16; // GPIO pin for PWM output
+const int freq = 5000; // PWM frequency in Hz
+const int ledChannel = 0; // LEDC channel to use
+const int resolution = 8; // 8-bit resolution (0-255)
 
 void motor_begin(){
   servo_left.attach(SERVO_PIN1);
   servo_right.attach(SERVO_PIN2);
 
-  pinMode(MOTOR_FRONT_A1, OUTPUT);
-  pinMode(MOTOR_FRONT_A2, OUTPUT);
-  pinMode(MOTOR_FRONT_B1, OUTPUT);
-  pinMode(MOTOR_FRONT_B2, OUTPUT);
-  pinMode(MOTOR_BACK_A1, OUTPUT);
-  pinMode(MOTOR_BACK_A2, OUTPUT);
-  pinMode(MOTOR_BACK_B1, OUTPUT);
-  pinMode(MOTOR_BACK_B2, OUTPUT);
+  // ledcSetup(ledChannel, freq, resolution); // Configure LEDC channel
+  ledcAttach(ledPin, freq, ledChannel); // Attach pin to channel
+  ledcWrite(ledPin, 210);
+  // pinMode(MOTOR_FRONT_A1, OUTPUT);
+  // pinMode(MOTOR_FRONT_A2, OUTPUT);
+  // pinMode(MOTOR_FRONT_B1, OUTPUT);
+  // pinMode(MOTOR_FRONT_B2, OUTPUT);
+  // pinMode(MOTOR_BACK_A1, OUTPUT);
+  // pinMode(MOTOR_BACK_A2, OUTPUT);
+  // pinMode(MOTOR_BACK_B1, OUTPUT);
+  // pinMode(MOTOR_BACK_B2, OUTPUT);
 
-  digitalWrite(MOTOR_FRONT_A1, LOW);
-  digitalWrite(MOTOR_FRONT_A2, LOW);
-  digitalWrite(MOTOR_FRONT_B1, LOW);
-  digitalWrite(MOTOR_FRONT_B2, LOW);
-  digitalWrite(MOTOR_BACK_A1, LOW);
-  digitalWrite(MOTOR_BACK_A2, LOW);
-  digitalWrite(MOTOR_BACK_B1, LOW);
-  digitalWrite(MOTOR_BACK_B2, LOW);
+  // digitalWrite(MOTOR_FRONT_A1, LOW);
+  // digitalWrite(MOTOR_FRONT_A2, LOW);
+  // digitalWrite(MOTOR_FRONT_B1, LOW);
+  // digitalWrite(MOTOR_FRONT_B2, LOW);
+  // digitalWrite(MOTOR_BACK_A1, LOW);
+  // digitalWrite(MOTOR_BACK_A2, LOW);
+  // digitalWrite(MOTOR_BACK_B1, LOW);
+  // digitalWrite(MOTOR_BACK_B2, LOW);
   
 }
 
