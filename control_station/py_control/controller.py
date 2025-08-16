@@ -5,7 +5,7 @@ import termios
 import threading
 
 # Replace with your ESP32 serial port
-SERIAL_PORT = '/dev/ttyUSB0'  # e.g., 'COM3' on Windows
+SERIAL_PORT = '/dev/ttyUSB1'  # e.g., 'COM3' on Windows
 BAUD_RATE = 115200
 
 # Open serial without toggling DTR (avoid auto-reset)

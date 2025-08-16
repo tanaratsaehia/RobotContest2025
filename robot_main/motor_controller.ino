@@ -155,8 +155,24 @@ void stop_motor(){
 
 void turn_left(int speed_percent){
   int percent2analog = int((speed_percent/100)*255);
+  digitalWrite(MOTOR_FRONT_A1, HIGH);
+  digitalWrite(MOTOR_FRONT_A2, LOW);
+  digitalWrite(MOTOR_FRONT_B1, LOW);
+  digitalWrite(MOTOR_FRONT_B2, LOW);
+  digitalWrite(MOTOR_BACK_A1, HIGH);
+  digitalWrite(MOTOR_BACK_A2, LOW);
+  digitalWrite(MOTOR_BACK_B1, LOW);
+  digitalWrite(MOTOR_BACK_B2, LOW);
 }
 
 void turn_right(int speed_percent){
   int percent2analog = int((speed_percent/100)*255);
+  digitalWrite(MOTOR_FRONT_A1, LOW);
+  digitalWrite(MOTOR_FRONT_A2, LOW);
+  digitalWrite(MOTOR_FRONT_B1, LOW);
+  digitalWrite(MOTOR_FRONT_B2, HIGH);
+  digitalWrite(MOTOR_BACK_A1, LOW);
+  digitalWrite(MOTOR_BACK_A2, LOW);
+  digitalWrite(MOTOR_BACK_B1, LOW);
+  digitalWrite(MOTOR_BACK_B2, HIGH);
 }
