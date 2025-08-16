@@ -23,25 +23,25 @@ void motor_begin(){
   servo_right.attach(SERVO_PIN2);
 
   // ledcSetup(ledChannel, freq, resolution); // Configure LEDC channel
-  ledcAttach(ledPin, freq, ledChannel); // Attach pin to channel
-  ledcWrite(ledPin, 210);
-  // pinMode(MOTOR_FRONT_A1, OUTPUT);
-  // pinMode(MOTOR_FRONT_A2, OUTPUT);
-  // pinMode(MOTOR_FRONT_B1, OUTPUT);
-  // pinMode(MOTOR_FRONT_B2, OUTPUT);
-  // pinMode(MOTOR_BACK_A1, OUTPUT);
-  // pinMode(MOTOR_BACK_A2, OUTPUT);
-  // pinMode(MOTOR_BACK_B1, OUTPUT);
-  // pinMode(MOTOR_BACK_B2, OUTPUT);
+  // ledcAttach(ledPin, freq, ledChannel); // Attach pin to channel
+  // ledcWrite(ledPin, 210);
+  pinMode(MOTOR_FRONT_A1, OUTPUT);
+  pinMode(MOTOR_FRONT_A2, OUTPUT);
+  pinMode(MOTOR_FRONT_B1, OUTPUT);
+  pinMode(MOTOR_FRONT_B2, OUTPUT);
+  pinMode(MOTOR_BACK_A1, OUTPUT);
+  pinMode(MOTOR_BACK_A2, OUTPUT);
+  pinMode(MOTOR_BACK_B1, OUTPUT);
+  pinMode(MOTOR_BACK_B2, OUTPUT);
 
-  // digitalWrite(MOTOR_FRONT_A1, LOW);
-  // digitalWrite(MOTOR_FRONT_A2, LOW);
-  // digitalWrite(MOTOR_FRONT_B1, LOW);
-  // digitalWrite(MOTOR_FRONT_B2, LOW);
-  // digitalWrite(MOTOR_BACK_A1, LOW);
-  // digitalWrite(MOTOR_BACK_A2, LOW);
-  // digitalWrite(MOTOR_BACK_B1, LOW);
-  // digitalWrite(MOTOR_BACK_B2, LOW);
+  digitalWrite(MOTOR_FRONT_A1, LOW);
+  digitalWrite(MOTOR_FRONT_A2, LOW);
+  digitalWrite(MOTOR_FRONT_B1, LOW);
+  digitalWrite(MOTOR_FRONT_B2, LOW);
+  digitalWrite(MOTOR_BACK_A1, LOW);
+  digitalWrite(MOTOR_BACK_A2, LOW);
+  digitalWrite(MOTOR_BACK_B1, LOW);
+  digitalWrite(MOTOR_BACK_B2, LOW);
   
 }
 
