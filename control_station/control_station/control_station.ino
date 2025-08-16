@@ -58,7 +58,7 @@ void send_command(const char *cmd) {
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial);
+  // while (!Serial);
   delay(1000); // Give USB time to enumerate
   Serial.println("[ESP32] Controller ready. Send w/s/a/d via Python GUI.");
   Serial.flush();
