@@ -3,9 +3,27 @@
 #include <BMI160Gen.h>
 #include <ESP32Servo.h>
 
+// ====== Heading-hold (BMI160) ======
+static const float GYRO_LSB_PER_DPS = 131.2f;  // BMI160 @ ±250 dps ≈ 131.2 LSB/(°/s)
+static const float KP = 1.8f;                  // Proportional gain (tune 0.8–3.0)
+static const float KD = 0.0f;                  // Derivative gain (start at 0)
+static const uint8_t MAX_PWM = 255;
+
+volatile float yaw_deg = 0.0f;     // integrated heading
+volatile float gyro_z_bias = 0.0f; // stationary bias
+unsigned long last_imu_us = 0;
+
+bool   straight_active   = false;
+float  target_yaw_deg    = 0.0f;
+uint8_t base_forward_pwm = 0;
+float  prev_err = 0.0f;
+
+// Convert % to 0..255 PWM
+static inline uint8_t pct_to_pwm(int p) { p = constrain(p, 0, 100); return (uint8_t)(p * 255 / 100); }
+
+
 // Pin definitions
 #define TRIG_PIN   32
-
 #define BUTTON_PIN 27
 #define BUZZER_PIN 14
 
@@ -31,6 +49,20 @@ unsigned long lastCommandTime = 0;
 Servo servo_left;
 Servo servo_right;
 
+void calibrate_gyro_bias(uint16_t samples = 800) {
+  // Keep robot still during this!
+  delay(200);
+  long sum = 0;
+  for (uint16_t i = 0; i < samples; i++) {
+    int gx, gy, gz;
+    BMI160.readGyro(gx, gy, gz);
+    sum += gz;
+    delay(2); // ~500 Hz sampling during calibration
+  }
+  gyro_z_bias = sum / (float)samples;
+}
+
+
 void setup() {
   Serial.begin(115200);
   while (!Serial);
@@ -48,6 +80,9 @@ void setup() {
   motor_begin();
   ultrasonic_begin();
   esp_now_begin();
+
+  calibrate_gyro_bias();      // <— add this
+  last_imu_us = micros();     // initialize timer for integration
 }
 
 void loop() {
@@ -115,8 +150,6 @@ void loop() {
   }
   digitalWrite(BUZZER_PIN, !button_status);
 
-  // if (now - lastCommandTime >= 600){
-  //   lastCommandTime = now;
-  //   stop_motor();
-  // }
+  // imu testing
+  straight_update();  // keeps yaw updated and trims motors when active
 }

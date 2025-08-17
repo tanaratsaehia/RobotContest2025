@@ -11,7 +11,7 @@
 #define SERVO_PIN1 26
 #define SERVO_PIN2 25
 
-const int MOTOR_SPEED = 40; // 0-100 %
+const int MOTOR_SPEED = 90; // 0-100 %
 const float TURN_FORWARD_RATIO = 0.45;
 
 void motor_begin(){
@@ -74,7 +74,10 @@ void move_motor(int action){
 void move_motor_with_command(const char* command){
   if (strcmp(command, "forward") == 0) {
     Serial.println("MOVE MOTOR FORWARD");
-    move_forward(MOTOR_SPEED);
+    // move_forward(MOTOR_SPEED);
+    calibrate_gyro_bias();      // <— add this
+    last_imu_us = micros();
+    straight_start(MOTOR_SPEED);
   } else if (strcmp(command, "backward") == 0) {
     Serial.println("MOVE MOTOR BACKWARD");
     move_backward(MOTOR_SPEED);
@@ -91,6 +94,7 @@ void move_motor_with_command(const char* command){
   } else {
     Serial.println("STOP MOTOR");
     stop_motor();
+    straight_stop();
     Serial.print("Unknown command: ");
     Serial.println(command);
   }
@@ -201,4 +205,24 @@ void turn_right_backward(int speed_percent){
   analogWrite(MOTOR_BACK_A2, duty);
   analogWrite(MOTOR_BACK_B1, 0);
   analogWrite(MOTOR_BACK_B2, duty);
+}
+
+
+
+
+// imu implements
+
+// Forward duty per side (your mapping from move_forward)
+void set_forward_side_pwm(uint8_t left_pwm, uint8_t right_pwm) {
+  // Right side = A1 pins forward
+  analogWrite(MOTOR_FRONT_A1, left_pwm);
+  analogWrite(MOTOR_FRONT_A2, 0);
+  analogWrite(MOTOR_BACK_A1,  left_pwm);
+  analogWrite(MOTOR_BACK_A2,  0);
+
+  // Left side = B2 pins forward
+  analogWrite(MOTOR_FRONT_B1, 0);
+  analogWrite(MOTOR_FRONT_B2, right_pwm);
+  analogWrite(MOTOR_BACK_B1,  0);
+  analogWrite(MOTOR_BACK_B2,  right_pwm);
 }
