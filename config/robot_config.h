@@ -6,6 +6,10 @@
 #ifndef ROBOT_CONFIG_H
 #define ROBOT_CONFIG_H
 
+// Local map storage
+extern MapCell localMap[LOCAL_MAP_SIZE][LOCAL_MAP_SIZE];
+
+
 // ================================
 // SYSTEM CONFIGURATION
 // ================================
@@ -88,6 +92,8 @@ static const uint8_t STATION_MAC_ADDR[] = {0x48, 0xe7, 0x29, 0xc9, 0x57, 0x28};
 #define WHEEL_BASE          150   // ระยะห่างระหว่างล้อซ้าย-ขวา (mm)
 #define ROBOT_LENGTH        200   // ความยาวหุ่นยนต์ (mm)
 #define ROBOT_WIDTH         150   // ความกว้างหุ่นยนต์ (mm)
+#define SOUND_SPEED 0.0343
+
 
 // ================================
 // SENSOR ANGLES AND POSITIONS
