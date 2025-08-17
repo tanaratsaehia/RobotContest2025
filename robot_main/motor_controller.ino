@@ -12,6 +12,7 @@
 #define SERVO_PIN2 25
 
 #define MOTOR_SPEED 90
+#define ANALOG_VALUE 105
 
 const int ledPin = 16; // GPIO pin for PWM output
 const int freq = 5000; // PWM frequency in Hz
@@ -34,14 +35,14 @@ void motor_begin(){
   pinMode(MOTOR_BACK_B1, OUTPUT);
   pinMode(MOTOR_BACK_B2, OUTPUT);
 
-  digitalWrite(MOTOR_FRONT_A1, LOW);
-  digitalWrite(MOTOR_FRONT_A2, LOW);
-  digitalWrite(MOTOR_FRONT_B1, LOW);
-  digitalWrite(MOTOR_FRONT_B2, LOW);
-  digitalWrite(MOTOR_BACK_A1, LOW);
-  digitalWrite(MOTOR_BACK_A2, LOW);
-  digitalWrite(MOTOR_BACK_B1, LOW);
-  digitalWrite(MOTOR_BACK_B2, LOW);
+  analogWrite(MOTOR_FRONT_A1, 0);
+  analogWrite(MOTOR_FRONT_A2, 0);
+  analogWrite(MOTOR_FRONT_B1, 0);
+  analogWrite(MOTOR_FRONT_B2, 0);
+  analogWrite(MOTOR_BACK_A1, 0);
+  analogWrite(MOTOR_BACK_A2, 0);
+  analogWrite(MOTOR_BACK_B1, 0);
+  analogWrite(MOTOR_BACK_B2, 0);
   
 }
 
@@ -103,76 +104,103 @@ void move_motor_with_command(const char* command){
 void move_forward(int speed_percent){
   int percent2analog = int((speed_percent/100)*255);
   // Serial.println("Motor speed: " + String(percent2analog));
-  // analogWrite(MOTOR_FRONT_A1, percent2analog);
+  analogWrite(MOTOR_FRONT_A1, ANALOG_VALUE);
+  analogWrite(MOTOR_FRONT_A2, 0);
+  analogWrite(MOTOR_FRONT_B1, 0);
+  analogWrite(MOTOR_FRONT_B2, ANALOG_VALUE);
+  analogWrite(MOTOR_BACK_A1, ANALOG_VALUE);
+  analogWrite(MOTOR_BACK_A2, 0);
+  analogWrite(MOTOR_BACK_B1, 0);
+  analogWrite(MOTOR_BACK_B2, ANALOG_VALUE);
+  // digitalWrite(MOTOR_FRONT_A1, HIGH);
   // digitalWrite(MOTOR_FRONT_A2, LOW);
   // digitalWrite(MOTOR_FRONT_B1, LOW);
-  // analogWrite(MOTOR_FRONT_B2, percent2analog);
-  // analogWrite(MOTOR_BACK_A1, percent2analog);
+  // digitalWrite(MOTOR_FRONT_B2, HIGH);
+  // digitalWrite(MOTOR_BACK_A1, HIGH);
   // digitalWrite(MOTOR_BACK_A2, LOW);
   // digitalWrite(MOTOR_BACK_B1, LOW);
-  // analogWrite(MOTOR_BACK_B2, percent2analog);
-  digitalWrite(MOTOR_FRONT_A1, HIGH);
-  digitalWrite(MOTOR_FRONT_A2, LOW);
-  digitalWrite(MOTOR_FRONT_B1, LOW);
-  digitalWrite(MOTOR_FRONT_B2, HIGH);
-  digitalWrite(MOTOR_BACK_A1, HIGH);
-  digitalWrite(MOTOR_BACK_A2, LOW);
-  digitalWrite(MOTOR_BACK_B1, LOW);
-  digitalWrite(MOTOR_BACK_B2, HIGH);
+  // digitalWrite(MOTOR_BACK_B2, HIGH);
 }
 
 void move_backward(int speed_percent){
   int percent2analog = int((speed_percent/100)*255);
   // Serial.println("Motor speed: " + String(percent2analog));
+  analogWrite(MOTOR_FRONT_A1, 0);
+  analogWrite(MOTOR_FRONT_A2, ANALOG_VALUE);
+  analogWrite(MOTOR_FRONT_B1, ANALOG_VALUE);
+  analogWrite(MOTOR_FRONT_B2, 0);
+  analogWrite(MOTOR_BACK_A1, 0);
+  analogWrite(MOTOR_BACK_A2, ANALOG_VALUE);
+  analogWrite(MOTOR_BACK_B1, ANALOG_VALUE);
+  analogWrite(MOTOR_BACK_B2, 0);
   // digitalWrite(MOTOR_FRONT_A1, LOW);
-  // analogWrite(MOTOR_FRONT_A2, percent2analog);
-  // analogWrite(MOTOR_FRONT_B1, percent2analog);
+  // digitalWrite(MOTOR_FRONT_A2, HIGH);
+  // digitalWrite(MOTOR_FRONT_B1, HIGH);
   // digitalWrite(MOTOR_FRONT_B2, LOW);
   // digitalWrite(MOTOR_BACK_A1, LOW);
-  // analogWrite(MOTOR_BACK_A2, percent2analog);
-  // analogWrite(MOTOR_BACK_B1, percent2analog);
+  // digitalWrite(MOTOR_BACK_A2, HIGH);
+  // digitalWrite(MOTOR_BACK_B1, HIGH);
   // digitalWrite(MOTOR_BACK_B2, LOW);
-  digitalWrite(MOTOR_FRONT_A1, LOW);
-  digitalWrite(MOTOR_FRONT_A2, HIGH);
-  digitalWrite(MOTOR_FRONT_B1, HIGH);
-  digitalWrite(MOTOR_FRONT_B2, LOW);
-  digitalWrite(MOTOR_BACK_A1, LOW);
-  digitalWrite(MOTOR_BACK_A2, HIGH);
-  digitalWrite(MOTOR_BACK_B1, HIGH);
-  digitalWrite(MOTOR_BACK_B2, LOW);
 }
 
 void stop_motor(){
-  digitalWrite(MOTOR_FRONT_A1, LOW);
-  digitalWrite(MOTOR_FRONT_A2, LOW);
-  digitalWrite(MOTOR_FRONT_B1, LOW);
-  digitalWrite(MOTOR_FRONT_B2, LOW);
-  digitalWrite(MOTOR_BACK_A1, LOW);
-  digitalWrite(MOTOR_BACK_A2, LOW);
-  digitalWrite(MOTOR_BACK_B1, LOW);
-  digitalWrite(MOTOR_BACK_B2, LOW);
+  // digitalWrite(MOTOR_FRONT_A1, LOW);
+  // digitalWrite(MOTOR_FRONT_A2, LOW);
+  // digitalWrite(MOTOR_FRONT_B1, LOW);
+  // digitalWrite(MOTOR_FRONT_B2, LOW);
+  // digitalWrite(MOTOR_BACK_A1, LOW);
+  // digitalWrite(MOTOR_BACK_A2, LOW);
+  // digitalWrite(MOTOR_BACK_B1, LOW);
+  // digitalWrite(MOTOR_BACK_B2, LOW);
+
+  analogWrite(MOTOR_FRONT_A1, 0);
+  analogWrite(MOTOR_FRONT_A2, 0);
+  analogWrite(MOTOR_FRONT_B1, 0);
+  analogWrite(MOTOR_FRONT_B2, 0);
+  analogWrite(MOTOR_BACK_A1, 0);
+  analogWrite(MOTOR_BACK_A2, 0);
+  analogWrite(MOTOR_BACK_B1, 0);
+  analogWrite(MOTOR_BACK_B2, 0);
 }
 
 void turn_left(int speed_percent){
   int percent2analog = int((speed_percent/100)*255);
-  digitalWrite(MOTOR_FRONT_A1, HIGH);
-  digitalWrite(MOTOR_FRONT_A2, LOW);
-  digitalWrite(MOTOR_FRONT_B1, LOW);
-  digitalWrite(MOTOR_FRONT_B2, LOW);
-  digitalWrite(MOTOR_BACK_A1, HIGH);
-  digitalWrite(MOTOR_BACK_A2, LOW);
-  digitalWrite(MOTOR_BACK_B1, LOW);
-  digitalWrite(MOTOR_BACK_B2, LOW);
+  // digitalWrite(MOTOR_FRONT_A1, HIGH);
+  // digitalWrite(MOTOR_FRONT_A2, LOW);
+  // digitalWrite(MOTOR_FRONT_B1, LOW);
+  // digitalWrite(MOTOR_FRONT_B2, LOW);
+  // digitalWrite(MOTOR_BACK_A1, HIGH);
+  // digitalWrite(MOTOR_BACK_A2, LOW);
+  // digitalWrite(MOTOR_BACK_B1, LOW);
+  // digitalWrite(MOTOR_BACK_B2, LOW);
+
+  analogWrite(MOTOR_FRONT_A1, ANALOG_VALUE);
+  analogWrite(MOTOR_FRONT_A2, 0);
+  analogWrite(MOTOR_FRONT_B1, 0);
+  analogWrite(MOTOR_FRONT_B2, 0);
+  analogWrite(MOTOR_BACK_A1, ANALOG_VALUE);
+  analogWrite(MOTOR_BACK_A2, 0);
+  analogWrite(MOTOR_BACK_B1, 0);
+  analogWrite(MOTOR_BACK_B2, 0);
 }
 
 void turn_right(int speed_percent){
   int percent2analog = int((speed_percent/100)*255);
-  digitalWrite(MOTOR_FRONT_A1, LOW);
-  digitalWrite(MOTOR_FRONT_A2, LOW);
-  digitalWrite(MOTOR_FRONT_B1, LOW);
-  digitalWrite(MOTOR_FRONT_B2, HIGH);
-  digitalWrite(MOTOR_BACK_A1, LOW);
-  digitalWrite(MOTOR_BACK_A2, LOW);
-  digitalWrite(MOTOR_BACK_B1, LOW);
-  digitalWrite(MOTOR_BACK_B2, HIGH);
+  // digitalWrite(MOTOR_FRONT_A1, LOW);
+  // digitalWrite(MOTOR_FRONT_A2, LOW);
+  // digitalWrite(MOTOR_FRONT_B1, LOW);
+  // digitalWrite(MOTOR_FRONT_B2, HIGH);
+  // digitalWrite(MOTOR_BACK_A1, LOW);
+  // digitalWrite(MOTOR_BACK_A2, LOW);
+  // digitalWrite(MOTOR_BACK_B1, LOW);
+  // digitalWrite(MOTOR_BACK_B2, HIGH);
+
+  analogWrite(MOTOR_FRONT_A1, 0);
+  analogWrite(MOTOR_FRONT_A2, 0);
+  analogWrite(MOTOR_FRONT_B1, 0);
+  analogWrite(MOTOR_FRONT_B2, ANALOG_VALUE);
+  analogWrite(MOTOR_BACK_A1, 0);
+  analogWrite(MOTOR_BACK_A2, 0);
+  analogWrite(MOTOR_BACK_B1, 0);
+  analogWrite(MOTOR_BACK_B2, ANALOG_VALUE);
 }
