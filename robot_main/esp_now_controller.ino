@@ -2,7 +2,7 @@
 #include <esp_now.h>
 
 // CHANGE THIS to the MAC address of the other ESP32
-uint8_t peerAddress[] = {0x48, 0xe7, 0x29, 0xc9, 0x57, 0x28}; 
+uint8_t peerAddress[] = {0x04, 0x83, 0x08, 0x58, 0x38, 0x18}; 
 
 typedef struct struct_message {
   char text[50];
@@ -23,6 +23,7 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, in
   Serial.print("Got message: ");
   Serial.println(incoming.text);
   move_motor_with_command(incoming.text);
+  lastCommandTime = millis();
 }
 
 void esp_now_begin(){
@@ -55,7 +56,8 @@ static unsigned long lastSend = 0;
 void test_send_message(int ms_interval){
   if (millis() - lastSend > ms_interval) {
     lastSend = millis();
-    snprintf(outgoing.text, sizeof(outgoing.text), "Hello from Robot %s", WiFi.macAddress().c_str());
+    snprintf(outgoing.text, sizeof(outgoing.text), "Hello from Robot");
+    // snprintf(outgoing.text, sizeof(outgoing.text), "Hello from Robot %s", WiFi.macAddress().c_str());
     esp_now_send(peerAddress, (uint8_t *) &outgoing, sizeof(outgoing));
   }
 }

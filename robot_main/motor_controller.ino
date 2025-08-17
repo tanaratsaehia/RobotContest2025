@@ -87,7 +87,7 @@ void move_motor_with_command(const char* command){
     Serial.println("MOVE MOTOR TURN LEFT");
     // turn_right(MOTOR_SPEED);
     turn_right_backward(MOTOR_SPEED);
-    // turn_right_forward(MOTOR_SPEED);
+    // turn_right_forward(MOTOR_SP[EED);
   } else {
     Serial.println("STOP MOTOR");
     stop_motor();

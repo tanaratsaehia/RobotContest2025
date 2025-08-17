@@ -15,14 +15,14 @@ struct_message outgoing;
 void onDataSent(const esp_now_send_info_t *info, esp_now_send_status_t status) {
   Serial.printf("[ESP32] Last Send Status: %s\n",
                 status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
-  Serial.flush();
+  // Serial.flush();
 }
 
 // Callback when data is received
 void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
   memcpy(&incoming, incomingData, sizeof(incoming));
-  Serial.printf("[ESP32] Got message: %s\n", incoming.text);
-  Serial.flush();
+  Serial.println("[ESP32] Got message: " + String(incoming.text));
+  // Serial.flush();
 }
 
 // Initialize ESP-NOW

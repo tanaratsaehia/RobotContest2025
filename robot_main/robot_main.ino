@@ -26,6 +26,8 @@ int motor_state = 0;
 unsigned long lastTriggerTime = 0;
 unsigned long lastMotorUpdate = 0;
 
+unsigned long lastCommandTime = 0;
+
 Servo servo_left;
 Servo servo_right;
 
@@ -53,7 +55,7 @@ void loop() {
   int button_status = digitalRead(BUTTON_PIN);
 
   // Trigger pulse every 50 ms
-  if (now - lastTriggerTime >= 500) {
+  if (now - lastTriggerTime >= 100) {
     lastTriggerTime = now;
     digitalWrite(TRIG_PIN, HIGH);
     delayMicroseconds(10);
@@ -94,20 +96,14 @@ void loop() {
       Serial.print(": ");
       Serial.print(distance_cm);
       Serial.println(" cm");
+      String msg = "Sensor " + String(i + 1) + ": " + String(distance_cm, 1) + " cm";
+      send_message(msg.c_str());
     }
   }
 
   // motor testing
   if (!button_status && now - lastMotorUpdate >= 500){
     lastMotorUpdate = now;
-    if (motor_state < 2){
-      motor_state += 1;
-    }else{
-      motor_state = 0;
-    }
-    // Serial.println("Change Motor state to: " + String(motor_state));
-    // move_motor(motor_state);
-
     if (servo_state) {
       servo_left.write(180);
       servo_right.write(180);
@@ -117,11 +113,10 @@ void loop() {
     }
     servo_state = !servo_state;
   }
-
-  // buzzer testing
-  // Serial.println("Button state: " + String(digitalRead(BUTTON_PIN)));
   digitalWrite(BUZZER_PIN, !button_status);
 
-  // test esp-now
-  test_send_message(200);
+  // if (now - lastCommandTime >= 600){
+  //   lastCommandTime = now;
+  //   stop_motor();
+  // }
 }
