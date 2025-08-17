@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 import serial
 import sys
 import threading
@@ -7,6 +8,11 @@ import time
 <<<<<<< Updated upstream
 # Replace with your ESP32 serial port
 SERIAL_PORT = '/dev/ttyUSB1'  # e.g., 'COM3' on Windows
+=======
+import serial, sys, threading, re, time
+
+SERIAL_PORT = 'COM6'  # <-- Change to your actual COM port
+>>>>>>> Stashed changes
 BAUD_RATE = 115200
 =======
 # การตั้งค่า Serial Communication
@@ -15,6 +21,7 @@ SERIAL_PORT = "COM6"   # Windows: COM3, COM4, etc. | Linux: /dev/ttyUSB0 | Mac: 
 BAUD_RATE = 115200     # ความเร็วการสื่อสาร (ต้องตรงกับใน ESP32)
 >>>>>>> Stashed changes
 
+<<<<<<< Updated upstream
 # ตัวแปรสำหรับเก็บสถานะ
 current_speed = 50     # ความเร็วปัจจุบัน (เริ่มต้นที่ 50%)
 speed_step = 10        # ขนาดการเพิ่ม/ลดความเร็วแต่ละครั้ง
@@ -56,6 +63,27 @@ def getch():
             ch = sys.stdin.read(1)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)  # คืนค่า setting เดิม
+=======
+# Sensor <num>: <float> cm
+SENSOR_RE = re.compile(r"Sensor\s*(\d+)\s*:\s*([+-]?\d+(?:\.\d+)?)\s*cm", re.I)
+sensor_vals = {1: None, 2: None, 3: None, 4: None}
+
+# Cross-platform getch
+if sys.platform == 'win32':
+    import msvcrt
+    def getch():
+        return msvcrt.getch().decode('utf-8')
+else:
+    import tty, termios
+    def getch():
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+>>>>>>> Stashed changes
         return ch
 
 def read_serial():
@@ -64,6 +92,7 @@ def read_serial():
     ทำงานแบบ background เพื่อไม่ให้บล็อกการกดปุ่มของผู้ใช้
     """
     while True:
+<<<<<<< Updated upstream
         try:
             if ser.in_waiting > 0:  # ตรวจสอบว่ามีข้อมูลรออยู่หรือไม่
                 line = ser.readline().decode("utf-8", errors="ignore").strip()
@@ -72,6 +101,40 @@ def read_serial():
                     display_status()  # แสดงสถานะปัจจุบันหลังจากได้รับข้อมูล
         except serial.SerialException:
             print("\n[Error] การเชื่อมต่อ Serial ขาดหาย")
+=======
+        raw = ser.readline()
+        if not raw:
+            continue
+        line = raw.decode('utf-8', errors='ignore').strip()
+        m = SENSOR_RE.search(line)
+        if not m:
+            continue
+        idx = int(m.group(1))
+        val = float(m.group(2))
+        if 1 <= idx <= 4:
+            sensor_vals[idx] = val
+
+def render_loop():
+    # Allocate exactly 4 lines once
+    sys.stdout.write("\n" * 4)
+    sys.stdout.flush()
+    while True:
+        sys.stdout.write("\033[4F")  # Move up 4 lines
+        for i in range(1, 5):
+            v = sensor_vals[i]
+            line = f"S{i}: {v:.1f} cm" if v is not None else f"S{i}: —"
+            sys.stdout.write("\r\033[K" + line + "\n")
+        sys.stdout.flush()
+        time.sleep(0.1)
+
+threading.Thread(target=read_serial, daemon=True).start()
+threading.Thread(target=render_loop, daemon=True).start()
+
+try:
+    while True:
+        key = getch()
+        if key == 'q':
+>>>>>>> Stashed changes
             break
         except KeyboardInterrupt:
             break

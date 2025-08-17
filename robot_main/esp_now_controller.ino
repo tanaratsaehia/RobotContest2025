@@ -1,6 +1,21 @@
 // esp_now_controller.ino - ระบบสื่อสาร ESP-NOW แบบสมบูรณ์
 
+<<<<<<< Updated upstream
 // ESP-NOW callback functions
+=======
+// CHANGE THIS to the MAC address of the other ESP32
+// uint8_t peerAddress[] = {0x04, 0x83, 0x08, 0x58, 0x38, 0x18}; 
+uint8_t peerAddress[] = {0x7c,0x87,0xce,0x2f,0xe3,0x20}; // Change this to your own MAC address if needed
+
+typedef struct struct_message {
+  char text[50];
+} struct_message;
+
+struct_message incoming;
+struct_message outgoing;
+
+// Callback when data is sent
+>>>>>>> Stashed changes
 void onDataSent(const esp_now_send_info_t *info, esp_now_send_status_t status) {
   if (status == ESP_NOW_SEND_SUCCESS) {
     Serial.println("✅ Message sent successfully");
