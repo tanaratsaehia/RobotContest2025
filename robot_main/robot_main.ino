@@ -1,317 +1,308 @@
-#include <WiFi.h>
-#include <esp_now.h>
-#include <EEPROM.h>
-#include "config.h"
+// communication.ino - ESP-NOW Communication System (FIXED)
 
-// ==================== GLOBAL VARIABLES ====================
-MapCell globalMap[MAP_SIZE][MAP_SIZE];
-Position robotPos = {0, 0, 0, 0};
-SensorData sensors;
-Mission currentMission;
-SystemState systemState = STATE_IDLE;
-MovementState moveState = MOVE_STOP;
+// Global message structures
+ESPNowMessage outgoingMsg;
+ESPNowMessage incomingMsg;
 
-// Sensor interrupt variables
-volatile unsigned long echo_start[NUM_SENSORS] = {0, 0, 0, 0};
-volatile unsigned long echo_end[NUM_SENSORS] = {0, 0, 0, 0};
-volatile bool echo_done[NUM_SENSORS] = {false, false, false, false};
-
-// Timing variables
-unsigned long lastSensorUpdate = 0;
-unsigned long lastMapUpdate = 0;
-unsigned long lastStatusSend = 0;
-unsigned long lastNavigationUpdate = 0;
-
-// ==================== SETUP ====================
-void setup() {
-  Serial.begin(SERIAL_BAUD);
-  while (!Serial);
+// ==================== ESP-NOW INITIALIZATION ====================
+void initializeESPNow() {
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect();
   
-  DEBUG_PRINTLN("🤖 Emergency Robot Mapping System Starting...");
-  DEBUG_PRINTLN("==========================================");
+  DEBUG_PRINTLN("📡 Initializing ESP-NOW...");
+  DEBUG_PRINTLN("Robot MAC: " + WiFi.macAddress());
   
-  // Initialize hardware
-  initializePins();
-  initializeSensors();
-  initializeMotors();
-  
-  // Initialize systems
-  initializeMap();
-  initializeEEPROM();
-  initializeESPNow();
-  
-  // Set initial position at map center
-  robotPos.x = 0;
-  robotPos.y = 0;
-  robotPos.heading = 0;
-  robotPos.timestamp = millis();
-  
-  systemState = STATE_IDLE;
-  
-  DEBUG_PRINTLN("✅ Robot ready!");
-  DEBUG_PRINTLN("Commands: M=Mapping, S=Stop, R=Reset");
-  
-  // Startup beep
-  tone(BUZZER_PIN, 1000, 200);
-  delay(300);
-  tone(BUZZER_PIN, 1500, 200);
-}
-
-// ==================== MAIN LOOP ====================
-void loop() {
-  unsigned long now = millis();
-  
-  // Update sensors (every 100ms)
-  if (now - lastSensorUpdate >= 100) {
-    lastSensorUpdate = now;
-    updateSensors();
+  if (esp_now_init() != ESP_OK) {
+    DEBUG_PRINTLN("❌ ESP-NOW initialization failed");
+    return;
   }
   
-  // Update mapping (every 200ms)
-  if (now - lastMapUpdate >= 200) {
-    lastMapUpdate = now;
-    updateMapping();
+  // Register callbacks - FIXED VERSION
+  esp_now_register_send_cb(OnDataSent);
+  esp_now_register_recv_cb(OnDataRecv);
+  
+  // Add control station as peer
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, stationAddress, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+  
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    DEBUG_PRINTLN("❌ Failed to add control station peer");
+    return;
   }
   
-  // Update navigation (every 150ms)
-  if (now - lastNavigationUpdate >= 150) {
-    lastNavigationUpdate = now;
-    updateNavigation();
-  }
-  
-  // Send status (every 1000ms)
-  if (now - lastStatusSend >= 1000) {
-    lastStatusSend = now;
-    sendStatus();
-  }
-  
-  // Handle serial commands
-  handleSerialCommands();
-  
-  // Handle button press
-  handleButtonPress();
-  
-  // State machine
-  executeStateMachine();
-  
-  delay(10);
-}
-
-// ==================== HARDWARE INITIALIZATION ====================
-void initializePins() {
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
-  pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(LED_STATUS, OUTPUT);
-  
-  DEBUG_PRINTLN("✅ Pins initialized");
-}
-
-// ==================== SERIAL COMMAND HANDLER ====================
-void handleSerialCommands() {
-  if (Serial.available()) {
-    char cmd = Serial.read();
-    
-    switch (cmd) {
-      case 'M':
-      case 'm':
-        if (systemState == STATE_IDLE) {
-          startMapping();
-        } else {
-          stopMapping();
-        }
-        break;
-        
-      case 'S':
-      case 's':
-        emergencyStop();
-        break;
-        
-      case 'R':
-      case 'r':
-        resetSystem();
-        break;
-        
-      case 'T':
-      case 't':
-        printSystemStatus();
-        break;
-        
-      case 'C':
-      case 'c':
-        clearMap();
-        break;
-        
-      default:
-        DEBUG_PRINTLN("Unknown command: " + String(cmd));
-    }
-  }
-}
-
-// ==================== BUTTON HANDLER ====================
-void handleButtonPress() {
-  static bool lastButtonState = HIGH;
-  static unsigned long buttonPressTime = 0;
-  
-  bool currentState = digitalRead(BUTTON_PIN);
-  
-  if (currentState == LOW && lastButtonState == HIGH) {
-    buttonPressTime = millis();
-  } else if (currentState == HIGH && lastButtonState == LOW) {
-    unsigned long pressDuration = millis() - buttonPressTime;
-    
-    if (pressDuration > 50 && pressDuration < 1000) {
-      // Short press - toggle mapping
-      if (systemState == STATE_MAPPING) {
-        stopMapping();
-      } else if (systemState == STATE_IDLE) {
-        startMapping();
-      }
-    } else if (pressDuration >= 1000) {
-      // Long press - emergency stop
-      emergencyStop();
-    }
-  }
-  
-  lastButtonState = currentState;
-}
-
-// ==================== SYSTEM CONTROL ====================
-void startMapping() {
-  systemState = STATE_MAPPING;
-  clearMap();
-  DEBUG_PRINTLN("🗺️ Mapping started");
-  tone(BUZZER_PIN, 1000, 100);
-}
-
-void stopMapping() {
-  systemState = STATE_IDLE;
-  stopMotors();
-  saveMapToEEPROM();
-  DEBUG_PRINTLN("⏹️ Mapping stopped and saved");
-  tone(BUZZER_PIN, 800, 100);
-  delay(150);
-  tone(BUZZER_PIN, 600, 100);
-}
-
-void emergencyStop() {
-  systemState = STATE_ERROR;
-  stopMotors();
-  DEBUG_PRINTLN("🛑 EMERGENCY STOP!");
-  
-  // Emergency beep pattern
-  for (int i = 0; i < 5; i++) {
-    tone(BUZZER_PIN, 2000, 100);
-    delay(150);
-  }
-}
-
-void resetSystem() {
-  systemState = STATE_IDLE;
-  stopMotors();
-  clearMap();
-  currentMission.active = false;
-  currentMission.waypointCount = 0;
-  DEBUG_PRINTLN("🔄 System reset");
-}
-
-// ==================== STATE MACHINE ====================
-void executeStateMachine() {
-  static unsigned long lastStateUpdate = 0;
-  unsigned long now = millis();
-  
-  if (now - lastStateUpdate < 100) return;
-  lastStateUpdate = now;
-  
-  switch (systemState) {
-    case STATE_IDLE:
-      // Just monitor and wait for commands
-      break;
-      
-    case STATE_MAPPING:
-      performMapping();
-      break;
-      
-    case STATE_MISSION_READY:
-      // Wait for start mission command
-      break;
-      
-    case STATE_MISSION_ACTIVE:
-      executeMission();
-      break;
-      
-    case STATE_GOTO_WAYPOINT:
-      navigateToCurrentWaypoint();
-      break;
-      
-    case STATE_AT_WAYPOINT:
-      handleWaypointArrival();
-      break;
-      
-    case STATE_MISSION_COMPLETE:
-      stopMotors();
-      DEBUG_PRINTLN("🎉 Mission completed!");
-      systemState = STATE_IDLE;
-      break;
-      
-    case STATE_ERROR:
-      // Stay in error state until manual reset
-      break;
-  }
-}
-
-// ==================== STATUS REPORTING ====================
-void printSystemStatus() {
-  DEBUG_PRINTLN("\n=== SYSTEM STATUS ===");
-  DEBUG_PRINTLN("State: " + String(getStateName()));
-  DEBUG_PRINTLN("Position: (" + String(robotPos.x, 1) + ", " + String(robotPos.y, 1) + ")");
-  DEBUG_PRINTLN("Heading: " + String(robotPos.heading, 1) + "°");
-  
-  DEBUG_PRINT("Sensors: ");
-  for (int i = 0; i < NUM_SENSORS; i++) {
-    if (sensors.valid[i]) {
-      DEBUG_PRINT(String(sensors.distances[i], 1) + " ");
-    } else {
-      DEBUG_PRINT("-- ");
-    }
+  DEBUG_PRINT("✅ ESP-NOW initialized, Station MAC: ");
+  for (int i = 0; i < 6; i++) {
+    DEBUG_PRINT(String(stationAddress[i], HEX));
+    if (i < 5) DEBUG_PRINT(":");
   }
   DEBUG_PRINTLN("");
-  
-  if (currentMission.active) {
-    DEBUG_PRINTLN("Mission: " + String(currentMission.currentWaypoint + 1) + 
-                  "/" + String(currentMission.waypointCount));
-  }
-  
-  DEBUG_PRINTLN("====================\n");
 }
 
-const char* getStateName() {
-  switch (systemState) {
-    case STATE_IDLE: return "IDLE";
-    case STATE_MAPPING: return "MAPPING";
-    case STATE_MISSION_READY: return "MISSION_READY";
-    case STATE_MISSION_ACTIVE: return "MISSION_ACTIVE";
-    case STATE_GOTO_WAYPOINT: return "GOTO_WAYPOINT";
-    case STATE_AT_WAYPOINT: return "AT_WAYPOINT";
-    case STATE_MISSION_COMPLETE: return "MISSION_COMPLETE";
-    case STATE_ERROR: return "ERROR";
-    default: return "UNKNOWN";
+// ==================== FIXED ESP-NOW CALLBACKS ====================
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  if (DEBUG_MODE && status != ESP_NOW_SEND_SUCCESS) {
+    DEBUG_PRINTLN("📤 Send failed to: " + macToString(mac_addr));
   }
+}
+
+void OnDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingData, int len) {
+  if (len == sizeof(ESPNowMessage)) {
+    memcpy(&incomingMsg, incomingData, sizeof(incomingMsg));
+    
+    DEBUG_PRINTLN("📨 Received: " + String(incomingMsg.type) + " - " + String(incomingMsg.data));
+    
+    // Process the received message
+    processIncomingMessage();
+  }
+}
+
+// ==================== MESSAGE PROCESSING ====================
+void processIncomingMessage() {
+  String msgType = String(incomingMsg.type);
+  String msgData = String(incomingMsg.data);
+  
+  if (msgType == "CMD") {
+    processCommand(msgData);
+  } else if (msgType == "WAYPOINT") {
+    processWaypoint(msgData);
+  } else if (msgType == "MISSION") {
+    processMissionCommand(msgData);
+  } else if (msgType == "CONFIG") {
+    processConfig(msgData);
+  } else {
+    DEBUG_PRINTLN("❓ Unknown message type: " + msgType);
+  }
+  
+  // Send acknowledgment
+  sendAcknowledgment(msgType);
+}
+
+void processCommand(String command) {
+  if (command == "START_MAPPING") {
+    startMapping();
+  } else if (command == "STOP_MAPPING") {
+    stopMapping();
+  } else if (command == "START_MISSION") {
+    startMission();
+  } else if (command == "STOP_MISSION") {
+    stopMission();
+  } else if (command == "EMERGENCY_STOP") {
+    emergencyStop();
+  } else if (command == "RESET") {
+    resetSystem();
+  } else if (command == "GET_STATUS") {
+    sendStatus();
+  } else if (command == "GET_MAP") {
+    sendMapData();
+  } else if (command == "CLEAR_WAYPOINTS") {
+    clearWaypoints();
+  } else if (command == "RETURN_HOME") {
+    returnToStart();
+  } else {
+    DEBUG_PRINTLN("❓ Unknown command: " + command);
+  }
+}
+
+void processWaypoint(String waypointData) {
+  // Parse waypoint data: "x,y" or "index,x,y"
+  int firstComma = waypointData.indexOf(',');
+  int secondComma = waypointData.indexOf(',', firstComma + 1);
+  
+  if (secondComma > 0) {
+    // Format: "index,x,y"
+    int index = waypointData.substring(0, firstComma).toInt();
+    float x = waypointData.substring(firstComma + 1, secondComma).toFloat();
+    float y = waypointData.substring(secondComma + 1).toFloat();
+    
+    if (setWaypoint(index, x, y)) {
+      DEBUG_PRINTLN("✅ Waypoint " + String(index) + " set to (" + String(x, 1) + ", " + String(y, 1) + ")");
+    }
+  } else if (firstComma > 0) {
+    // Format: "x,y" - add new waypoint
+    float x = waypointData.substring(0, firstComma).toFloat();
+    float y = waypointData.substring(firstComma + 1).toFloat();
+    
+    if (addWaypoint(x, y)) {
+      DEBUG_PRINTLN("✅ Waypoint added at (" + String(x, 1) + ", " + String(y, 1) + ")");
+    }
+  }
+}
+
+void processMissionCommand(String missionData) {
+  if (missionData == "START") {
+    startMission();
+  } else if (missionData == "STOP") {
+    stopMission();
+  } else if (missionData == "PAUSE") {
+    stopMotors(); // Simple pause
+  } else if (missionData == "RESUME") {
+    if (currentMission.active) {
+      systemState = STATE_MISSION_ACTIVE;
+    }
+  } else if (missionData == "STATUS") {
+    sendMissionStatus();
+  } else {
+    DEBUG_PRINTLN("❓ Unknown mission command: " + missionData);
+  }
+}
+
+void processConfig(String configData) {
+  // Parse configuration data
+  // Format: "param=value"
+  int equalIndex = configData.indexOf('=');
+  if (equalIndex > 0) {
+    String param = configData.substring(0, equalIndex);
+    String value = configData.substring(equalIndex + 1);
+    
+    DEBUG_PRINTLN("⚙️ Config: " + param + " = " + value);
+    // Add configuration processing here
+  }
+}
+
+// ==================== MESSAGE SENDING ====================
+void sendMessage(String type, String data) {
+  strncpy(outgoingMsg.type, type.c_str(), sizeof(outgoingMsg.type) - 1);
+  strncpy(outgoingMsg.data, data.c_str(), sizeof(outgoingMsg.data) - 1);
+  outgoingMsg.checksum = calculateChecksum(&outgoingMsg);
+  
+  esp_err_t result = esp_now_send(stationAddress, (uint8_t *)&outgoingMsg, sizeof(outgoingMsg));
+  
+  if (result != ESP_OK && DEBUG_MODE) {
+    DEBUG_PRINTLN("❌ Send failed: " + String(result));
+  }
+}
+
+void sendStatus() {
+  String statusData = String(robotPos.x, 1) + "," + String(robotPos.y, 1) + "," + 
+                     String(robotPos.heading, 1) + "," + String(getStateName()) + "," +
+                     String(getMapCompletionPercentage(), 1);
+  
+  // Add sensor data
+  statusData += ",";
+  for (int i = 0; i < NUM_SENSORS; i++) {
+    if (i > 0) statusData += ":";
+    statusData += sensors.valid[i] ? String(sensors.distances[i], 1) : "0";
+  }
+  
+  sendMessage("STATUS", statusData);
+}
+
+void sendMapData() {
+  DEBUG_PRINTLN("📤 Sending map data...");
+  
+  // Send map data in chunks
+  int chunkSize = 50; // Cells per message
+  int totalCells = 0;
+  
+  for (int x = 0; x < MAP_SIZE; x++) {
+    for (int y = 0; y < MAP_SIZE; y++) {
+      if (globalMap[x][y].confidence > 20) {
+        String mapChunk = String(x) + "," + String(y) + "," + String(globalMap[x][y].value);
+        sendMessage("MAP", mapChunk);
+        
+        totalCells++;
+        delay(10); // Small delay to avoid overwhelming the receiver
+        
+        if (totalCells % chunkSize == 0) {
+          delay(50); // Longer delay every chunk
+        }
+      }
+    }
+  }
+  
+  // Send end marker
+  sendMessage("MAP", "END");
+  DEBUG_PRINTLN("✅ Map data sent (" + String(totalCells) + " cells)");
+}
+
+void sendMissionStatus() {
+  String missionData = String(currentMission.active ? "1" : "0") + "," +
+                      String(currentMission.waypointCount) + "," +
+                      String(currentMission.currentWaypoint) + "," +
+                      String(getMissionProgress(), 1);
+  
+  sendMessage("MISSION", missionData);
+}
+
+void sendAcknowledgment(String originalType) {
+  sendMessage("ACK", originalType);
 }
 
 // ==================== UTILITY FUNCTIONS ====================
-void tone(int pin, int frequency, int duration) {
-  // Simple tone generation for ESP32
-  pinMode(pin, OUTPUT);
-  
-  if (frequency <= 0 || duration <= 0) return;
-  
-  int period = 1000000 / frequency;
-  int cycles = (duration * 1000) / period;
-  
-  for (int i = 0; i < cycles; i++) {
-    digitalWrite(pin, HIGH);
-    delayMicroseconds(period / 2);
-    digitalWrite(pin, LOW);
-    delayMicroseconds(period / 2);
+String macToString(const uint8_t* mac) {
+  String result = "";
+  for (int i = 0; i < 6; i++) {
+    if (i > 0) result += ":";
+    if (mac[i] < 0x10) result += "0";
+    result += String(mac[i], HEX);
   }
+  return result;
+}
+
+uint8_t calculateChecksum(ESPNowMessage* msg) {
+  uint8_t checksum = 0;
+  uint8_t* data = (uint8_t*)msg;
+  
+  // Calculate checksum for all data except the checksum field itself
+  for (int i = 0; i < sizeof(ESPNowMessage) - 1; i++) {
+    checksum ^= data[i];
+  }
+  
+  return checksum;
+}
+
+bool verifyChecksum(ESPNowMessage* msg) {
+  uint8_t calculatedChecksum = calculateChecksum(msg);
+  return calculatedChecksum == msg->checksum;
+}
+
+// ==================== HEARTBEAT AND MONITORING ====================
+void sendHeartbeat() {
+  static unsigned long lastHeartbeat = 0;
+  unsigned long now = millis();
+  
+  if (now - lastHeartbeat >= 5000) { // Every 5 seconds
+    lastHeartbeat = now;
+    
+    String heartbeatData = String(now / 1000) + "," + String(getStateName());
+    sendMessage("HEARTBEAT", heartbeatData);
+  }
+}
+
+void sendTelemetry() {
+  static unsigned long lastTelemetry = 0;
+  unsigned long now = millis();
+  
+  if (now - lastTelemetry >= 2000) { // Every 2 seconds
+    lastTelemetry = now;
+    
+    // Create telemetry data
+    String telemetryData = String(analogRead(A0)) + "," + // Battery level (example)
+                          String(getValidSensorCount()) + "," +
+                          String(moveState) + "," +
+                          String(millis() / 1000); // Uptime
+    
+    sendMessage("TELEMETRY", telemetryData);
+  }
+}
+
+// ==================== COMMUNICATION TEST ====================
+void testCommunication() {
+  DEBUG_PRINTLN("📡 Testing ESP-NOW communication...");
+  
+  sendMessage("TEST", "Robot communication test");
+  
+  // Wait for response
+  unsigned long startTime = millis();
+  bool responseReceived = false;
+  
+  while (millis() - startTime < 3000 && !responseReceived) {
+    delay(100);
+    // Check if we received an ACK
+    // This would be handled in the main loop
+  }
+  
+  DEBUG_PRINTLN("✅ Communication test complete");
 }

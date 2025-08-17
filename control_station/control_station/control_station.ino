@@ -101,7 +101,7 @@ void initializeESPNow() {
     return;
   }
   
-  // Register callbacks
+  // Register callbacks - FIXED VERSION
   esp_now_register_send_cb(onDataSent);
   esp_now_register_recv_cb(onDataRecv);
   
@@ -124,13 +124,14 @@ void initializeESPNow() {
   Serial.println();
 }
 
+// ==================== FIXED CALLBACK FUNCTIONS ====================
 void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   if (DEBUG_MODE && status != ESP_NOW_SEND_SUCCESS) {
     Serial.println("📤 Send failed");
   }
 }
 
-void onDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+void onDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingData, int len) {
   if (len == sizeof(ESPNowMessage)) {
     memcpy(&incomingMsg, incomingData, sizeof(incomingMsg));
     
