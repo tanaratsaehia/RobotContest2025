@@ -5,13 +5,23 @@
 #define SERIAL_BAUD 115200
 #define DEBUG_MODE 1
 
+<<<<<<< Updated upstream
 // Robot MAC address
 uint8_t robotAddress[] = {0x48, 0xe7, 0x29, 0xc9, 0xdf, 0x68};
+=======
+typedef struct struct_message {
+  char command[50];
+  float param1;
+  float param2;
+  int mode;  // 0=manual, 1=autonomous_mapping
+} struct_message;
+>>>>>>> Stashed changes
 
 // Map configuration
 #define MAP_SIZE 30
 #define CELL_SIZE 5.0
 
+<<<<<<< Updated upstream
 // ==================== DATA STRUCTURES ====================
 struct ESPNowMessage {
   char type[10];
@@ -86,6 +96,34 @@ void loop() {
   sendHeartbeat();
   
   delay(100);
+=======
+enum ControlMode {
+  MANUAL_CONTROL = 0,
+  AUTONOMOUS_MAPPING = 1,
+  MONITORING = 2
+};
+
+ControlMode current_mode = MANUAL_CONTROL;
+
+// Callback when data is sent
+void onDataSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
+  Serial.print("Send Status: ");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Success" : "Fail");
+}
+
+// Callback when data is received
+void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  Serial.print("Received from: ");
+  char macStr[18];
+  snprintf(macStr, sizeof(macStr),
+           "%02X:%02X:%02X:%02X:%02X:%02X",
+           info->src_addr[0], info->src_addr[1], info->src_addr[2],
+           info->src_addr[3], info->src_addr[4], info->src_addr[5]);
+  Serial.print(macStr);
+  Serial.print(" -> ");
+  Serial.write(data, len);
+  Serial.println();
+>>>>>>> Stashed changes
 }
 
 // ==================== ESP-NOW FUNCTIONS ====================
@@ -97,7 +135,12 @@ void initializeESPNow() {
   Serial.println("Station MAC: " + WiFi.macAddress());
   
   if (esp_now_init() != ESP_OK) {
+<<<<<<< Updated upstream
     Serial.println("❌ ESP-NOW initialization failed");
+=======
+    Serial.println("[Control Station] Error initializing ESP-NOW");
+    Serial.flush();
+>>>>>>> Stashed changes
     return;
   }
   
@@ -112,7 +155,12 @@ void initializeESPNow() {
   peerInfo.encrypt = false;
   
   if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+<<<<<<< Updated upstream
     Serial.println("❌ Failed to add robot peer");
+=======
+    Serial.println("[Control Station] Failed to add peer");
+    Serial.flush();
+>>>>>>> Stashed changes
     return;
   }
   
@@ -131,6 +179,7 @@ void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   }
 }
 
+<<<<<<< Updated upstream
 void onDataRecv(const esp_now_recv_info_t *recv_info, const uint8_t *incomingData, int len) {
   if (len == sizeof(ESPNowMessage)) {
     memcpy(&incomingMsg, incomingData, sizeof(incomingMsg));
@@ -474,4 +523,130 @@ uint8_t calculateChecksum(ESPNowMessage* msg) {
   }
   
   return checksum;
+=======
+// Send command with parameters
+void send_command(const char *cmd, float p1 = 0, float p2 = 0, int mode = 0) {
+  strcpy(outgoing.command, cmd);
+  outgoing.param1 = p1;
+  outgoing.param2 = p2;
+  outgoing.mode = mode;
+  
+  esp_now_send(peerAddress, (uint8_t *)&outgoing, sizeof(outgoing));
+  Serial.printf("[Sent] %s (%.2f, %.2f, mode:%d)\n", cmd, p1, p2, mode);
+}
+
+void print_menu() {
+  Serial.println("\n=== ROBOT CONTROL STATION ===");
+  Serial.println("Manual Control:");
+  Serial.println("  w/s/a/d - Move robot");
+  Serial.println("  x       - Stop robot");
+  Serial.println("");
+  Serial.println("Autonomous Mapping:");
+  Serial.println("  m       - Start mapping mode");
+  Serial.println("  r       - Return to start");
+  Serial.println("  p       - Pause mapping");
+  Serial.println("  c       - Continue mapping");
+  Serial.println("");
+  Serial.println("Settings:");
+  Serial.println("  1-9     - Set motor speed (10%-90%)");
+  Serial.println("  t       - Test sensors");
+  Serial.println("  h       - Show this menu");
+  Serial.println("=============================\n");
+}
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial);
+  delay(1000);
+  
+  Serial.println("[Control Station] Starting...");
+  esp_now_begin();
+  
+  print_menu();
+  Serial.println("Ready! Enter command:");
+}
+
+void loop() {
+  // Read command from Serial
+  if (Serial.available()) {
+    char cmd = Serial.read();
+    
+    switch (cmd) {
+      // ===== MANUAL CONTROL =====
+      case 'w':
+        send_command("forward", 0, 0, MANUAL_CONTROL);
+        break;
+        
+      case 's':
+        send_command("backward", 0, 0, MANUAL_CONTROL);
+        break;
+        
+      case 'a':
+        send_command("turn_left", 0, 0, MANUAL_CONTROL);
+        break;
+        
+      case 'd':
+        send_command("turn_right", 0, 0, MANUAL_CONTROL);
+        break;
+        
+      case 'x':
+        send_command("stop", 0, 0, MANUAL_CONTROL);
+        break;
+      
+      // ===== AUTONOMOUS MAPPING =====
+      case 'm':
+        Serial.println("=== STARTING AUTONOMOUS MAPPING ===");
+        current_mode = AUTONOMOUS_MAPPING;
+        send_command("start_mapping", 0, 0, AUTONOMOUS_MAPPING);
+        break;
+        
+      case 'r':
+        Serial.println("Command: Return to start");
+        send_command("return_to_start", 0, 0, AUTONOMOUS_MAPPING);
+        break;
+        
+      case 'p':
+        Serial.println("Command: Pause mapping");
+        send_command("pause_mapping", 0, 0, AUTONOMOUS_MAPPING);
+        break;
+        
+      case 'c':
+        Serial.println("Command: Continue mapping");
+        send_command("continue_mapping", 0, 0, AUTONOMOUS_MAPPING);
+        break;
+      
+      // ===== SETTINGS =====
+      case '1': case '2': case '3': case '4': case '5':
+      case '6': case '7': case '8': case '9':
+        {
+          int speed = (cmd - '0') * 10; // 10%, 20%, ..., 90%
+          Serial.printf("Setting motor speed to %d%%\n", speed);
+          send_command("set_speed", speed, 0, current_mode);
+        }
+        break;
+        
+      case 't':
+        Serial.println("Testing all sensors...");
+        send_command("test_sensors", 0, 0, MONITORING);
+        break;
+        
+      case 'h':
+        print_menu();
+        break;
+        
+      default:
+        if (cmd != '\n' && cmd != '\r') {
+          Serial.printf("Unknown command: %c (press 'h' for help)\n", cmd);
+        }
+        break;
+    }
+  }
+  
+  // Auto-request status updates during autonomous mode
+  static unsigned long last_status_request = 0;
+  if (current_mode == AUTONOMOUS_MAPPING && millis() - last_status_request > 5000) {
+    last_status_request = millis();
+    send_command("get_status", 0, 0, MONITORING);
+  }
+>>>>>>> Stashed changes
 }
