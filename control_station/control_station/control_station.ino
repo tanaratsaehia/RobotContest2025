@@ -1,477 +1,476 @@
 #include <WiFi.h>
 #include <esp_now.h>
 
-// Mode selection - choose one
-#define SIMPLE_MODE 0    // เหมือนโค้ดเดิม (keyboard control เท่านั้น)
-#define MAPPING_MODE 1   // ระบบ mapping แบบเต็ม
+// ==================== CONFIGURATION ====================
+#define SERIAL_BAUD 115200
+#define DEBUG_MODE 1
 
-#if MAPPING_MODE
-// Mapping mode configuration
-#define MAP_SIZE 100
-#define CELL_SIZE 10
-#define LOCAL_MAP_SIZE 5
+// Robot MAC address
+uint8_t robotAddress[] = {0x48, 0xe7, 0x29, 0xc9, 0xdf, 0x68};
 
-struct Position {
-  float x, y, heading;
+// Map configuration
+#define MAP_SIZE 30
+#define CELL_SIZE 5.0
+
+// ==================== DATA STRUCTURES ====================
+struct ESPNowMessage {
+  char type[10];
+  char data[200];
+  uint8_t checksum;
 };
 
-typedef struct {
+struct RobotStatus {
   float x, y, heading;
-  float distances[4];
-  int8_t mapData[25]; // 5x5 local map
-} MapMessage;
+  String state;
+  float mapCompletion;
+  float sensors[4];
+  unsigned long lastUpdate;
+};
 
-// Global map storage
-int8_t globalMap[MAP_SIZE][MAP_SIZE];
-Position robotPosition;
-float sensorDistances[4];
-unsigned long lastDataReceived = 0;
-bool newDataAvailable = false;
+struct MapData {
+  int8_t grid[MAP_SIZE][MAP_SIZE];
+  unsigned long lastUpdate;
+  int knownCells;
+};
 
-// Initialize global map
-void initGlobalMap() {
-  for (int i = 0; i < MAP_SIZE; i++) {
-    for (int j = 0; j < MAP_SIZE; j++) {
-      globalMap[i][j] = -1; // Unknown
-    }
-  }
-  Serial.println("✅ Global map initialized");
+// ==================== GLOBAL VARIABLES ====================
+ESPNowMessage outgoingMsg;
+ESPNowMessage incomingMsg;
+RobotStatus robotStatus;
+MapData globalMap;
+bool robotConnected = false;
+unsigned long lastHeartbeat = 0;
+
+// ==================== SETUP ====================
+void setup() {
+  Serial.begin(SERIAL_BAUD);
+  while (!Serial);
+  
+  Serial.println("🏢 Control Station Starting...");
+  Serial.println("===============================");
+  
+  // Initialize map
+  initializeMap();
+  
+  // Initialize ESP-NOW
+  initializeESPNow();
+  
+  // Initialize robot status
+  robotStatus.x = 0;
+  robotStatus.y = 0;
+  robotStatus.heading = 0;
+  robotStatus.state = "UNKNOWN";
+  robotStatus.mapCompletion = 0;
+  robotStatus.lastUpdate = 0;
+  
+  Serial.println("✅ Control Station ready!");
+  Serial.println("Commands:");
+  Serial.println("  m - Start/Stop mapping");
+  Serial.println("  s - Get status");
+  Serial.println("  w - Add waypoint");
+  Serial.println("  g - Start mission");
+  Serial.println("  x - Emergency stop");
+  Serial.println("  r - Reset robot");
+  Serial.println("===============================");
 }
 
-// Convert world coordinates to grid coordinates
-void worldToGrid(float worldX, float worldY, int* gridX, int* gridY) {
-  *gridX = constrain((int)(worldX / CELL_SIZE), 0, MAP_SIZE - 1);
-  *gridY = constrain((int)(worldY / CELL_SIZE), 0, MAP_SIZE - 1);
+// ==================== MAIN LOOP ====================
+void loop() {
+  // Handle serial commands
+  handleSerialCommands();
+  
+  // Check robot connection
+  checkRobotConnection();
+  
+  // Send heartbeat
+  sendHeartbeat();
+  
+  delay(100);
 }
 
-// Parse text status message from robot
-void parseStatusMessage(const char* message) {
-  // Parse: [STATUS] Robot: (520.0,500.0) 15.0° | Sensors: F120 R95 B180 L160
-  
-  // Find robot position
-  char* robotPos = strstr(message, "Robot: (");
-  if (robotPos) {
-    float x, y, heading;
-    if (sscanf(robotPos, "Robot: (%f,%f) %f°", &x, &y, &heading) == 3) {
-      robotPosition.x = x;
-      robotPosition.y = y;
-      robotPosition.heading = heading;
-    }
-  }
-  
-  // Find sensor data
-  char* sensorData = strstr(message, "Sensors: ");
-  if (sensorData) {
-    float f, r, b, l;
-    if (sscanf(sensorData, "Sensors: F%f R%f B%f L%f", &f, &r, &b, &l) == 4) {
-      sensorDistances[0] = f;
-      sensorDistances[1] = r;
-      sensorDistances[2] = b;
-      sensorDistances[3] = l;
-    }
-  }
-  
-  Serial.printf("📍 Parsed: Position (%.1f,%.1f) %.1f° | Sensors F%.0f R%.0f B%.0f L%.0f\n",
-                robotPosition.x, robotPosition.y, robotPosition.heading,
-                sensorDistances[0], sensorDistances[1], sensorDistances[2], sensorDistances[3]);
-  
-  // Update map based on sensor data
-  updateMapFromSensors();
-}
-
-// Update map from sensor data
-void updateMapFromSensors() {
-  int robotGridX, robotGridY;
-  worldToGrid(robotPosition.x, robotPosition.y, &robotGridX, &robotGridY);
-  
-  // Mark robot position as free
-  if (robotGridX >= 0 && robotGridX < MAP_SIZE && robotGridY >= 0 && robotGridY < MAP_SIZE) {
-    globalMap[robotGridX][robotGridY] = 0;
-  }
-  
-  // Process each sensor
-  float sensorAngles[] = {0, 90, 180, 270}; // Front, Right, Back, Left
-  
-  for (int i = 0; i < 4; i++) {
-    if (sensorDistances[i] > 0 && sensorDistances[i] < 400) {
-      float totalAngle = robotPosition.heading + sensorAngles[i];
-      while (totalAngle >= 360) totalAngle -= 360;
-      while (totalAngle < 0) totalAngle += 360;
-      
-      float radians = totalAngle * PI / 180.0;
-      
-      // Mark free space along the ray
-      int steps = (int)(sensorDistances[i] / (CELL_SIZE / 2));
-      for (int step = 1; step < steps; step++) {
-        float rayX = robotPosition.x + step * (CELL_SIZE / 2) * cos(radians);
-        float rayY = robotPosition.y + step * (CELL_SIZE / 2) * sin(radians);
-        
-        int gridX, gridY;
-        worldToGrid(rayX, rayY, &gridX, &gridY);
-        
-        if (gridX >= 0 && gridX < MAP_SIZE && gridY >= 0 && gridY < MAP_SIZE) {
-          if (globalMap[gridX][gridY] != 100) { // Don't overwrite obstacles
-            globalMap[gridX][gridY] = 0; // Free space
-          }
-        }
-      }
-      
-      // Mark obstacle at the end (if sensor reading indicates obstacle)
-      if (sensorDistances[i] < 300) { // Less than 3 meters = likely obstacle
-        float obstacleX = robotPosition.x + sensorDistances[i] * cos(radians);
-        float obstacleY = robotPosition.y + sensorDistances[i] * sin(radians);
-        
-        int obstacleGridX, obstacleGridY;
-        worldToGrid(obstacleX, obstacleY, &obstacleGridX, &obstacleGridY);
-        
-        if (obstacleGridX >= 0 && obstacleGridX < MAP_SIZE && 
-            obstacleGridY >= 0 && obstacleGridY < MAP_SIZE) {
-          globalMap[obstacleGridX][obstacleGridY] = 100; // Obstacle
-        }
-      }
-    }
-  }
-}
-
-#endif // MAPPING_MODE
-
-// MAC address of the robot car ESP32
-uint8_t peerAddress[] = {0x48, 0xE7, 0x29, 0xC9, 0xDF, 0x68};
-
-typedef struct struct_message {
-  char text[50];
-} struct_message;
-
-struct_message incoming;
-struct_message outgoing;
-
-// Callback when data is sent
-void onDataSent(const esp_now_send_info_t *info, esp_now_send_status_t status) {
-  Serial.printf("[ESP32] Last Send Status: %s\n",
-                status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
-  Serial.flush();
-}
-
-// Callback when data is received
-void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
-#if SIMPLE_MODE
-  // Simple mode - just print received messages
-  memcpy(&incoming, incomingData, sizeof(incoming));
-  Serial.printf("[ESP32] Got message: %s\n", incoming.text);
-  Serial.flush();
-  
-#elif MAPPING_MODE
-  // Try to parse as text message first (from current robot code)
-  if (len == sizeof(struct_message)) {
-    memcpy(&incoming, incomingData, sizeof(incoming));
-    
-    // Check if it's a STATUS message
-    if (strstr(incoming.text, "[STATUS]") != NULL) {
-      // Parse the status message manually
-      parseStatusMessage(incoming.text);
-      lastDataReceived = millis();
-      newDataAvailable = true;
-    } else {
-      // Regular message
-      Serial.printf("[ESP32] Got message: %s\n", incoming.text);
-    }
-    Serial.flush();
-    
-  } else if (len == sizeof(MapMessage)) {
-    // Handle full MapMessage (for future use)
-    MapMessage* msg = (MapMessage*)incomingData;
-    
-    // Update robot position
-    robotPosition.x = msg->x;
-    robotPosition.y = msg->y;
-    robotPosition.heading = msg->heading;
-    
-    // Update sensor distances
-    for (int i = 0; i < 4; i++) {
-      sensorDistances[i] = msg->distances[i];
-    }
-    
-    // Update global map with received local map
-    int robotGridX, robotGridY;
-    worldToGrid(robotPosition.x, robotPosition.y, &robotGridX, &robotGridY);
-    
-    int idx = 0;
-    for (int i = -2; i <= 2; i++) {
-      for (int j = -2; j <= 2; j++) {
-        int x = robotGridX + i;
-        int y = robotGridY + j;
-        if (x >= 0 && x < MAP_SIZE && y >= 0 && y < MAP_SIZE) {
-          if (msg->mapData[idx] != -1) { // Valid data
-            globalMap[x][y] = msg->mapData[idx];
-          }
-        }
-        idx++;
-      }
-    }
-    
-    lastDataReceived = millis();
-    newDataAvailable = true;
-    
-    Serial.printf("📦 Received MapMessage: Robot at (%.1f,%.1f) heading %.1f°\n", 
-                  robotPosition.x, robotPosition.y, robotPosition.heading);
-  } else {
-    // Unknown message format
-    Serial.printf("[ESP32] Received unknown message format (length: %d)\n", len);
-  }
-#endif
-}
-
-// Initialize ESP-NOW
-void esp_now_begin() {
+// ==================== ESP-NOW FUNCTIONS ====================
+void initializeESPNow() {
   WiFi.mode(WIFI_STA);
-
-  Serial.print("📡 Control Station MAC: ");
-  Serial.println(WiFi.macAddress());
-  Serial.printf("🎯 Target Robot MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
-                peerAddress[0], peerAddress[1], peerAddress[2],
-                peerAddress[3], peerAddress[4], peerAddress[5]);
-
+  WiFi.disconnect();
+  
+  Serial.println("📡 Initializing ESP-NOW...");
+  Serial.println("Station MAC: " + WiFi.macAddress());
+  
   if (esp_now_init() != ESP_OK) {
-    Serial.println("[ESP32] Error initializing ESP-NOW");
-    Serial.flush();
+    Serial.println("❌ ESP-NOW initialization failed");
     return;
   }
-
+  
+  // Register callbacks
   esp_now_register_send_cb(onDataSent);
   esp_now_register_recv_cb(onDataRecv);
-
+  
+  // Add robot as peer
   esp_now_peer_info_t peerInfo = {};
-  memcpy(peerInfo.peer_addr, peerAddress, 6);
+  memcpy(peerInfo.peer_addr, robotAddress, 6);
   peerInfo.channel = 0;
   peerInfo.encrypt = false;
-
+  
   if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    Serial.println("[ESP32] Failed to add peer");
-    Serial.flush();
+    Serial.println("❌ Failed to add robot peer");
     return;
   }
   
-  Serial.println("✅ ESP-NOW initialized successfully");
-}
-
-// Send a command string over ESP-NOW
-void send_command(const char *cmd) {
-  snprintf(outgoing.text, sizeof(outgoing.text), "%s", cmd);
-  esp_now_send(peerAddress, (uint8_t *)&outgoing, sizeof(outgoing));
-}
-
-#if MAPPING_MODE
-// Print map in ASCII format
-void printMap() {
-  Serial.println("\n=== GLOBAL MAP ===");
-  Serial.printf("Map size: %dx%d cells, Cell size: %dcm\n", MAP_SIZE, MAP_SIZE, CELL_SIZE);
-  Serial.printf("Robot position: (%.1f,%.1f) heading %.1f°\n", 
-                robotPosition.x, robotPosition.y, robotPosition.heading);
-  Serial.printf("Sensors - F:%.1f R:%.1f B:%.1f L:%.1f\n", 
-                sensorDistances[0], sensorDistances[1], sensorDistances[2], sensorDistances[3]);
-  
-  // Find map boundaries with data
-  int minX = MAP_SIZE, maxX = 0, minY = MAP_SIZE, maxY = 0;
-  bool hasData = false;
-  
-  for (int i = 0; i < MAP_SIZE; i++) {
-    for (int j = 0; j < MAP_SIZE; j++) {
-      if (globalMap[i][j] != -1) {
-        minX = min(minX, i);
-        maxX = max(maxX, i);
-        minY = min(minY, j);
-        maxY = max(maxY, j);
-        hasData = true;
-      }
-    }
-  }
-  
-  if (!hasData) {
-    Serial.println("No map data available yet");
-    return;
-  }
-  
-  // Print map with boundaries
-  int robotGridX, robotGridY;
-  worldToGrid(robotPosition.x, robotPosition.y, &robotGridX, &robotGridY);
-  
-  // Expand view around robot
-  minX = max(0, min(minX, robotGridX - 10));
-  maxX = min(MAP_SIZE - 1, max(maxX, robotGridX + 10));
-  minY = max(0, min(minY, robotGridY - 10));
-  maxY = min(MAP_SIZE - 1, max(maxY, robotGridY + 10));
-  
-  Serial.printf("Showing area: X(%d-%d) Y(%d-%d)\n", minX, maxX, minY, maxY);
-  
-  // Print column numbers
-  Serial.print("    ");
-  for (int i = minX; i <= maxX; i++) {
-    Serial.printf("%d", i % 10);
+  Serial.print("✅ ESP-NOW initialized, Robot MAC: ");
+  for (int i = 0; i < 6; i++) {
+    Serial.print(String(robotAddress[i], HEX));
+    if (i < 5) Serial.print(":");
   }
   Serial.println();
+}
+
+void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+  if (DEBUG_MODE && status != ESP_NOW_SEND_SUCCESS) {
+    Serial.println("📤 Send failed");
+  }
+}
+
+void onDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+  if (len == sizeof(ESPNowMessage)) {
+    memcpy(&incomingMsg, incomingData, sizeof(incomingMsg));
+    
+    robotConnected = true;
+    lastHeartbeat = millis();
+    
+    processIncomingMessage();
+  }
+}
+
+// ==================== MESSAGE PROCESSING ====================
+void processIncomingMessage() {
+  String msgType = String(incomingMsg.type);
+  String msgData = String(incomingMsg.data);
   
-  // Print map from top to bottom
-  for (int j = maxY; j >= minY; j--) {
-    Serial.printf("%3d ", j);
-    for (int i = minX; i <= maxX; i++) {
-      if (i == robotGridX && j == robotGridY) {
-        // Show robot with direction indicator
-        char robotChar = 'R';
-        if (robotPosition.heading >= -45 && robotPosition.heading < 45) robotChar = '>';
-        else if (robotPosition.heading >= 45 && robotPosition.heading < 135) robotChar = '^';
-        else if (robotPosition.heading >= 135 && robotPosition.heading < 225) robotChar = '<';
-        else robotChar = 'v';
-        Serial.printf("%c", robotChar);
-      } else if (globalMap[i][j] == 100) {
-        Serial.print("#"); // Obstacle
-      } else if (globalMap[i][j] == 0) {
-        Serial.print("."); // Free space
-      } else {
-        Serial.print(" "); // Unknown
+  if (msgType == "STATUS") {
+    processStatusMessage(msgData);
+  } else if (msgType == "MAP") {
+    processMapMessage(msgData);
+  } else if (msgType == "MISSION") {
+    processMissionMessage(msgData);
+  } else if (msgType == "HEARTBEAT") {
+    processHeartbeatMessage(msgData);
+  } else if (msgType == "ACK") {
+    Serial.println("📨 ACK: " + msgData);
+  } else {
+    Serial.println("📨 " + msgType + ": " + msgData);
+  }
+}
+
+void processStatusMessage(String statusData) {
+  // Parse: "x,y,heading,state,mapCompletion,sensor1:sensor2:sensor3:sensor4"
+  int commaCount = 0;
+  int lastIndex = 0;
+  
+  for (int i = 0; i <= statusData.length(); i++) {
+    if (i == statusData.length() || statusData.charAt(i) == ',') {
+      String value = statusData.substring(lastIndex, i);
+      
+      switch (commaCount) {
+        case 0: robotStatus.x = value.toFloat(); break;
+        case 1: robotStatus.y = value.toFloat(); break;
+        case 2: robotStatus.heading = value.toFloat(); break;
+        case 3: robotStatus.state = value; break;
+        case 4: robotStatus.mapCompletion = value.toFloat(); break;
+        case 5: parseSensorData(value); break;
       }
+      
+      lastIndex = i + 1;
+      commaCount++;
+    }
+  }
+  
+  robotStatus.lastUpdate = millis();
+  
+  // Print status to serial for Python GUI
+  Serial.println("[STATUS] Robot: (" + String(robotStatus.x, 1) + "," + 
+                String(robotStatus.y, 1) + ") " + String(robotStatus.heading, 1) + 
+                "° | State: " + robotStatus.state + " | Map: " + 
+                String(robotStatus.mapCompletion, 1) + "%");
+}
+
+void parseSensorData(String sensorString) {
+  int colonCount = 0;
+  int lastIndex = 0;
+  
+  for (int i = 0; i <= sensorString.length(); i++) {
+    if (i == sensorString.length() || sensorString.charAt(i) == ':') {
+      if (colonCount < 4) {
+        robotStatus.sensors[colonCount] = sensorString.substring(lastIndex, i).toFloat();
+      }
+      lastIndex = i + 1;
+      colonCount++;
+    }
+  }
+}
+
+void processMapMessage(String mapData) {
+  if (mapData == "END") {
+    Serial.println("📍 Map data transfer complete");
+    globalMap.lastUpdate = millis();
+    return;
+  }
+  
+  // Parse: "x,y,value"
+  int firstComma = mapData.indexOf(',');
+  int secondComma = mapData.indexOf(',', firstComma + 1);
+  
+  if (firstComma > 0 && secondComma > 0) {
+    int x = mapData.substring(0, firstComma).toInt();
+    int y = mapData.substring(firstComma + 1, secondComma).toInt();
+    int value = mapData.substring(secondComma + 1).toInt();
+    
+    if (x >= 0 && x < MAP_SIZE && y >= 0 && y < MAP_SIZE) {
+      globalMap.grid[x][y] = value;
+      if (value != -1) globalMap.knownCells++;
+    }
+  }
+}
+
+void processMissionMessage(String missionData) {
+  Serial.println("📋 Mission: " + missionData);
+}
+
+void processHeartbeatMessage(String heartbeatData) {
+  // Robot is alive
+  robotConnected = true;
+  lastHeartbeat = millis();
+}
+
+// ==================== COMMAND HANDLING ====================
+void handleSerialCommands() {
+  if (Serial.available()) {
+    char cmd = Serial.read();
+    
+    switch (cmd) {
+      case 'M':
+      case 'm':
+        toggleMapping();
+        break;
+      case 'S':
+      case 's':
+        requestStatus();
+        break;
+      case 'W':
+      case 'w':
+        addWaypointInteractive();
+        break;
+      case 'G':
+      case 'g':
+        startMission();
+        break;
+      case 'X':
+      case 'x':
+        emergencyStop();
+        break;
+      case 'R':
+      case 'r':
+        resetRobot();
+        break;
+      case 'T':
+      case 't':
+        printSystemStatus();
+        break;
+      case 'C':
+      case 'c':
+        clearMap();
+        break;
+      default:
+        // Check if it's a waypoint command from Python GUI
+        if (cmd >= '0' && cmd <= '9') {
+          handlePythonCommand(cmd);
+        }
+    }
+  }
+}
+
+void handlePythonCommand(char cmd) {
+  // Handle commands from Python GUI
+  // Format: "1x,y" where 1 is command type and x,y are coordinates
+  String command = "";
+  command += cmd;
+  
+  // Read rest of command
+  while (Serial.available()) {
+    char c = Serial.read();
+    if (c == '\n' || c == '\r') break;
+    command += c;
+  }
+  
+  processPythonCommand(command);
+}
+
+void processPythonCommand(String command) {
+  if (command.startsWith("1")) {
+    // Add waypoint: "1x,y"
+    String coords = command.substring(1);
+    int commaIndex = coords.indexOf(',');
+    if (commaIndex > 0) {
+      float x = coords.substring(0, commaIndex).toFloat();
+      float y = coords.substring(commaIndex + 1).toFloat();
+      sendWaypoint(x, y);
+    }
+  } else if (command.startsWith("2")) {
+    // Start mission
+    startMission();
+  } else if (command.startsWith("3")) {
+    // Stop mission
+    sendCommand("STOP_MISSION");
+  }
+}
+
+// ==================== ROBOT COMMANDS ====================
+void sendCommand(String command) {
+  sendMessage("CMD", command);
+  Serial.println("📤 Sent: " + command);
+}
+
+void sendMessage(String type, String data) {
+  strncpy(outgoingMsg.type, type.c_str(), sizeof(outgoingMsg.type) - 1);
+  strncpy(outgoingMsg.data, data.c_str(), sizeof(outgoingMsg.data) - 1);
+  outgoingMsg.checksum = calculateChecksum(&outgoingMsg);
+  
+  esp_now_send(robotAddress, (uint8_t *)&outgoingMsg, sizeof(outgoingMsg));
+}
+
+void toggleMapping() {
+  if (robotStatus.state == "MAPPING") {
+    sendCommand("STOP_MAPPING");
+    Serial.println("⏹️ Stopping mapping");
+  } else {
+    sendCommand("START_MAPPING");
+    Serial.println("🗺️ Starting mapping");
+  }
+}
+
+void requestStatus() {
+  sendCommand("GET_STATUS");
+}
+
+void addWaypointInteractive() {
+  Serial.println("Enter waypoint coordinates (x,y):");
+  
+  // Wait for input
+  while (!Serial.available()) {
+    delay(10);
+  }
+  
+  String input = Serial.readString();
+  input.trim();
+  
+  int commaIndex = input.indexOf(',');
+  if (commaIndex > 0) {
+    float x = input.substring(0, commaIndex).toFloat();
+    float y = input.substring(commaIndex + 1).toFloat();
+    sendWaypoint(x, y);
+  } else {
+    Serial.println("❌ Invalid format. Use: x,y");
+  }
+}
+
+void sendWaypoint(float x, float y) {
+  String waypointData = String(x, 1) + "," + String(y, 1);
+  sendMessage("WAYPOINT", waypointData);
+  Serial.println("📍 Waypoint added: (" + String(x, 1) + ", " + String(y, 1) + ")");
+}
+
+void startMission() {
+  sendMessage("MISSION", "START");
+  Serial.println("🚀 Mission started");
+}
+
+void emergencyStop() {
+  sendCommand("EMERGENCY_STOP");
+  Serial.println("🛑 Emergency stop sent");
+}
+
+void resetRobot() {
+  sendCommand("RESET");
+  Serial.println("🔄 Reset command sent");
+}
+
+// ==================== STATUS FUNCTIONS ====================
+void checkRobotConnection() {
+  static bool wasConnected = false;
+  
+  bool isConnected = (millis() - lastHeartbeat < 10000); // 10 second timeout
+  
+  if (isConnected != wasConnected) {
+    if (isConnected) {
+      Serial.println("✅ Robot connected");
+    } else {
+      Serial.println("❌ Robot connection lost");
+    }
+    wasConnected = isConnected;
+  }
+  
+  robotConnected = isConnected;
+}
+
+void sendHeartbeat() {
+  static unsigned long lastSent = 0;
+  
+  if (millis() - lastSent >= 5000) { // Every 5 seconds
+    lastSent = millis();
+    sendMessage("HEARTBEAT", String(millis() / 1000));
+  }
+}
+
+void printSystemStatus() {
+  Serial.println("\n=== CONTROL STATION STATUS ===");
+  Serial.println("Robot Connected: " + String(robotConnected ? "YES" : "NO"));
+  
+  if (robotConnected) {
+    Serial.println("Robot Position: (" + String(robotStatus.x, 1) + ", " + String(robotStatus.y, 1) + ")");
+    Serial.println("Robot Heading: " + String(robotStatus.heading, 1) + "°");
+    Serial.println("Robot State: " + robotStatus.state);
+    Serial.println("Map Completion: " + String(robotStatus.mapCompletion, 1) + "%");
+    
+    Serial.print("Sensors: ");
+    for (int i = 0; i < 4; i++) {
+      Serial.print(String(robotStatus.sensors[i], 1) + " ");
     }
     Serial.println();
-  }
-  Serial.println("===================\n");
-}
-
-// Calculate map statistics
-void printMapStats() {
-  int unknownCells = 0, freeCells = 0, occupiedCells = 0;
-  
-  for (int i = 0; i < MAP_SIZE; i++) {
-    for (int j = 0; j < MAP_SIZE; j++) {
-      if (globalMap[i][j] == -1) unknownCells++;
-      else if (globalMap[i][j] == 0) freeCells++;
-      else if (globalMap[i][j] == 100) occupiedCells++;
-    }
-  }
-  
-  int totalCells = MAP_SIZE * MAP_SIZE;
-  float explorationPercent = ((float)(freeCells + occupiedCells) / totalCells) * 100;
-  
-  Serial.println("=== MAP STATISTICS ===");
-  Serial.printf("Total cells: %d\n", totalCells);
-  Serial.printf("Unknown: %d (%.1f%%)\n", unknownCells, (float)unknownCells/totalCells*100);
-  Serial.printf("Free: %d (%.1f%%)\n", freeCells, (float)freeCells/totalCells*100);
-  Serial.printf("Occupied: %d (%.1f%%)\n", occupiedCells, (float)occupiedCells/totalCells*100);
-  Serial.printf("Exploration: %.1f%%\n", explorationPercent);
-  Serial.println("========================\n");
-}
-
-// Reset map function
-void resetMap() {
-  initGlobalMap();
-  robotPosition.x = MAP_SIZE * CELL_SIZE / 2;
-  robotPosition.y = MAP_SIZE * CELL_SIZE / 2;
-  robotPosition.heading = 0;
-  for (int i = 0; i < 4; i++) {
-    sensorDistances[i] = 0;
-  }
-  Serial.println("🔄 Map has been reset!");
-}
-#endif // MAPPING_MODE
-
-void setup() {
-  Serial.begin(115200);
-  while (!Serial);
-  delay(1000); // Give USB time to enumerate
-
-#if SIMPLE_MODE
-  Serial.println("[ESP32] Controller ready. Send w/s/a/d via Python GUI.");
-  Serial.println("=== SIMPLE CONTROL MODE ===");
-#elif MAPPING_MODE
-  Serial.println("🤖 ESP32 Control Station Starting...");
-  initGlobalMap();
-  robotPosition.x = MAP_SIZE * CELL_SIZE / 2;
-  robotPosition.y = MAP_SIZE * CELL_SIZE / 2;
-  robotPosition.heading = 0;
-  
-  Serial.println("=== ROBOT MAPPING CONTROL STATION ===");
-  Serial.println("Commands:");
-  Serial.println("  w - Forward");
-  Serial.println("  s - Backward");
-  Serial.println("  a - Turn Left");
-  Serial.println("  d - Turn Right");
-  Serial.println("  x - Stop");
-  Serial.println("  m - Print Map");
-  Serial.println("  t - Map Statistics");
-  Serial.println("  r - Reset Map");
-  Serial.println("=====================================\n");
-#endif
-
-  Serial.flush();
-  esp_now_begin();
-  
-  Serial.println("🚀 Control Station ready!");
-}
-
-void loop() {
-  unsigned long currentTime = millis();
-  
-  // Read serial from Python GUI or Serial Monitor
-  while (Serial.available()) {
-    char cmd = Serial.read();
-    switch (cmd) {
-      case 'w':
-        send_command("forward");
-        Serial.println("📤 Sent: forward");
-        break;
-      case 's':
-        send_command("backward");
-        Serial.println("📤 Sent: backward");
-        break;
-      case 'a':
-        send_command("turn_left");
-        Serial.println("📤 Sent: turn_left");
-        break;
-      case 'd':
-        send_command("turn_right");
-        Serial.println("📤 Sent: turn_right");
-        break;
-      case 'x':
-        send_command("stop");
-        Serial.println("📤 Sent: stop");
-        break;
-#if MAPPING_MODE
-      case 'm':
-        printMap();
-        break;
-      case 't':
-        printMapStats();
-        break;
-      case 'r':
-        resetMap();
-        break;
-#endif
-      default:
-        // Ignore unknown commands
-        break;
-    }
-  }
-
-#if MAPPING_MODE
-  // Check for communication timeout
-  if (currentTime - lastDataReceived > 5000 && lastDataReceived > 0) {
-    static unsigned long lastWarning = 0;
-    if (currentTime - lastWarning > 10000) { // Warning every 10 seconds
-      Serial.println("⚠️  WARNING: No data received from robot for 5+ seconds!");
-      lastWarning = currentTime;
-    }
-  }
-  
-  // Update display and print info periodically
-  static unsigned long lastUpdate = 0;
-  if (newDataAvailable && currentTime - lastUpdate > 2000) { // Every 2 seconds
-    lastUpdate = currentTime;
-    newDataAvailable = false;
     
-    // Print brief status
-    Serial.printf("[STATUS] Robot: (%.1f,%.1f) %.1f° | Sensors: F%.0f R%.0f B%.0f L%.0f\n",
-                  robotPosition.x, robotPosition.y, robotPosition.heading,
-                  sensorDistances[0], sensorDistances[1], sensorDistances[2], sensorDistances[3]);
+    unsigned long timeSinceUpdate = (millis() - robotStatus.lastUpdate) / 1000;
+    Serial.println("Last Update: " + String(timeSinceUpdate) + " seconds ago");
   }
-#endif
+  
+  Serial.println("Map Known Cells: " + String(globalMap.knownCells));
+  Serial.println("===============================\n");
+}
 
-  delay(10);
+// ==================== MAP FUNCTIONS ====================
+void initializeMap() {
+  for (int x = 0; x < MAP_SIZE; x++) {
+    for (int y = 0; y < MAP_SIZE; y++) {
+      globalMap.grid[x][y] = -1; // Unknown
+    }
+  }
+  globalMap.knownCells = 0;
+  globalMap.lastUpdate = 0;
+  
+  Serial.println("✅ Map initialized");
+}
+
+void clearMap() {
+  initializeMap();
+  sendCommand("CLEAR_MAP");
+  Serial.println("🗑️ Map cleared");
+}
+
+// ==================== UTILITY FUNCTIONS ====================
+uint8_t calculateChecksum(ESPNowMessage* msg) {
+  uint8_t checksum = 0;
+  uint8_t* data = (uint8_t*)msg;
+  
+  for (int i = 0; i < sizeof(ESPNowMessage) - 1; i++) {
+    checksum ^= data[i];
+  }
+  
+  return checksum;
 }
