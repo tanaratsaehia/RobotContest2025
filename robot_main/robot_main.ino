@@ -1,6 +1,6 @@
 /*
- * Minimal Robot Code for Testing
- * Basic functionality only to avoid reset issues
+ * Real-time Robot Control
+ * Responsive control with reduced speed
  */
 
 #include <WiFi.h>
@@ -28,25 +28,38 @@ uint8_t controllerAddress[] = {0x7c, 0x87, 0xce, 0x2f, 0xe3, 0x20};
 #define MOTOR_BACK_B1 16
 #define MOTOR_BACK_B2 17
 
+// Motor speed settings (reduced for better control)
+#define SPEED_SLOW    80   // ความเร็วช้า
+#define SPEED_NORMAL  120  // ความเร็วปกติ
+#define SPEED_FAST    150  // ความเร็วเร็ว
+
 // Global variables
 volatile unsigned long echo_start[4] = {0, 0, 0, 0};
 volatile unsigned long echo_end[4] = {0, 0, 0, 0};
 volatile bool echo_done[4] = {false, false, false, false};
 float sensor_distances[4] = {999.0, 999.0, 999.0, 999.0};
 
+// Control variables
+String currentCommand = "stop";
+String lastCommand = "";
+unsigned long commandStartTime = 0;
+unsigned long lastCommandTime = 0;
+int currentSpeed = SPEED_NORMAL;
+
 unsigned long lastTriggerTime = 0;
 unsigned long lastStatusTime = 0;
+unsigned long lastSensorSendTime = 0;
 bool esp_now_initialized = false;
 
 // ESP-NOW message structure
 typedef struct struct_message {
-  char text[50];
+  char text[100];  // เพิ่มขนาดสำหรับข้อมูลเพิ่มเติม
 } struct_message;
 
 struct_message incoming;
 struct_message outgoing;
 
-// Motor control functions
+// Motor control functions with variable speed
 void stop_motor() {
   analogWrite(MOTOR_FRONT_A1, 0);
   analogWrite(MOTOR_FRONT_A2, 0);
@@ -59,51 +72,105 @@ void stop_motor() {
 }
 
 void move_forward() {
-  Serial.println("[MOTOR] Moving forward");
-  analogWrite(MOTOR_FRONT_A1, 150);
+  analogWrite(MOTOR_FRONT_A1, currentSpeed);
   analogWrite(MOTOR_FRONT_A2, 0);
   analogWrite(MOTOR_FRONT_B1, 0);
-  analogWrite(MOTOR_FRONT_B2, 150);
-  analogWrite(MOTOR_BACK_A1, 150);
+  analogWrite(MOTOR_FRONT_B2, currentSpeed);
+  analogWrite(MOTOR_BACK_A1, currentSpeed);
   analogWrite(MOTOR_BACK_A2, 0);
   analogWrite(MOTOR_BACK_B1, 0);
-  analogWrite(MOTOR_BACK_B2, 150);
+  analogWrite(MOTOR_BACK_B2, currentSpeed);
 }
 
 void move_backward() {
-  Serial.println("[MOTOR] Moving backward");
   analogWrite(MOTOR_FRONT_A1, 0);
-  analogWrite(MOTOR_FRONT_A2, 150);
-  analogWrite(MOTOR_FRONT_B1, 150);
+  analogWrite(MOTOR_FRONT_A2, currentSpeed);
+  analogWrite(MOTOR_FRONT_B1, currentSpeed);
   analogWrite(MOTOR_FRONT_B2, 0);
   analogWrite(MOTOR_BACK_A1, 0);
-  analogWrite(MOTOR_BACK_A2, 150);
-  analogWrite(MOTOR_BACK_B1, 150);
+  analogWrite(MOTOR_BACK_A2, currentSpeed);
+  analogWrite(MOTOR_BACK_B1, currentSpeed);
   analogWrite(MOTOR_BACK_B2, 0);
 }
 
 void turn_left() {
-  Serial.println("[MOTOR] Turning left");
-  analogWrite(MOTOR_FRONT_A1, 150);
+  analogWrite(MOTOR_FRONT_A1, currentSpeed);
   analogWrite(MOTOR_FRONT_A2, 0);
-  analogWrite(MOTOR_FRONT_B1, 150);
+  analogWrite(MOTOR_FRONT_B1, currentSpeed);
   analogWrite(MOTOR_FRONT_B2, 0);
-  analogWrite(MOTOR_BACK_A1, 150);
+  analogWrite(MOTOR_BACK_A1, currentSpeed);
   analogWrite(MOTOR_BACK_A2, 0);
-  analogWrite(MOTOR_BACK_B1, 150);
+  analogWrite(MOTOR_BACK_B1, currentSpeed);
   analogWrite(MOTOR_BACK_B2, 0);
 }
 
 void turn_right() {
-  Serial.println("[MOTOR] Turning right");
   analogWrite(MOTOR_FRONT_A1, 0);
-  analogWrite(MOTOR_FRONT_A2, 150);
+  analogWrite(MOTOR_FRONT_A2, currentSpeed);
   analogWrite(MOTOR_FRONT_B1, 0);
-  analogWrite(MOTOR_FRONT_B2, 150);
+  analogWrite(MOTOR_FRONT_B2, currentSpeed);
   analogWrite(MOTOR_BACK_A1, 0);
-  analogWrite(MOTOR_BACK_A2, 150);
+  analogWrite(MOTOR_BACK_A2, currentSpeed);
   analogWrite(MOTOR_BACK_B1, 0);
-  analogWrite(MOTOR_BACK_B2, 150);
+  analogWrite(MOTOR_BACK_B2, currentSpeed);
+}
+
+// Strafe movements for mecanum wheels (if applicable)
+void strafe_left() {
+  analogWrite(MOTOR_FRONT_A1, 0);
+  analogWrite(MOTOR_FRONT_A2, currentSpeed);
+  analogWrite(MOTOR_FRONT_B1, 0);
+  analogWrite(MOTOR_FRONT_B2, currentSpeed);
+  analogWrite(MOTOR_BACK_A1, currentSpeed);
+  analogWrite(MOTOR_BACK_A2, 0);
+  analogWrite(MOTOR_BACK_B1, currentSpeed);
+  analogWrite(MOTOR_BACK_B2, 0);
+}
+
+void strafe_right() {
+  analogWrite(MOTOR_FRONT_A1, currentSpeed);
+  analogWrite(MOTOR_FRONT_A2, 0);
+  analogWrite(MOTOR_FRONT_B1, currentSpeed);
+  analogWrite(MOTOR_FRONT_B2, 0);
+  analogWrite(MOTOR_BACK_A1, 0);
+  analogWrite(MOTOR_BACK_A2, currentSpeed);
+  analogWrite(MOTOR_BACK_B1, 0);
+  analogWrite(MOTOR_BACK_B2, currentSpeed);
+}
+
+// Execute motor command
+void executeCommand(String command) {
+  if (command == "forward") {
+    move_forward();
+  } else if (command == "backward") {
+    move_backward();
+  } else if (command == "turn_left" || command == "left") {
+    turn_left();
+  } else if (command == "turn_right" || command == "right") {
+    turn_right();
+  } else if (command == "strafe_left") {
+    strafe_left();
+  } else if (command == "strafe_right") {
+    strafe_right();
+  } else if (command == "stop") {
+    stop_motor();
+  } else {
+    stop_motor();
+  }
+}
+
+// Set motor speed
+void setSpeed(String speedLevel) {
+  if (speedLevel == "slow") {
+    currentSpeed = SPEED_SLOW;
+    Serial.println("[SPEED] Set to SLOW");
+  } else if (speedLevel == "normal") {
+    currentSpeed = SPEED_NORMAL;
+    Serial.println("[SPEED] Set to NORMAL");
+  } else if (speedLevel == "fast") {
+    currentSpeed = SPEED_FAST;
+    Serial.println("[SPEED] Set to FAST");
+  }
 }
 
 // Ultrasonic interrupt handlers
@@ -145,65 +212,64 @@ void IRAM_ATTR echo4ISR() {
 
 // ESP-NOW callbacks
 void onDataSent(const esp_now_send_info_t *info, esp_now_send_status_t status) {
-  Serial.print("[ESP-NOW] Send: ");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "OK" : "FAILED");
+  // ลดการแสดงผลเพื่อความเร็ว
+  if (status != ESP_NOW_SEND_SUCCESS) {
+    Serial.println("[ESP-NOW] Send FAILED");
+  }
 }
 
 void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
   memcpy(&incoming, incomingData, sizeof(incoming));
   String command = String(incoming.text);
   
-  Serial.print("[ESP-NOW] Received: ");
-  Serial.println(command);
+  lastCommandTime = millis();
   
-  // Handle commands
-  if (command == "forward") {
-    move_forward();
-  } else if (command == "backward") {
-    move_backward();
-  } else if (command == "turn_left") {
-    turn_left();
-  } else if (command == "turn_right") {
-    turn_right();
-  } else if (command == "stop") {
-    stop_motor();
-  } else {
-    Serial.println("[ESP-NOW] Unknown command, stopping");
-    stop_motor();
+  // Parse command and speed if included
+  if (command.indexOf("speed:") != -1) {
+    int speedIndex = command.indexOf("speed:");
+    String speedLevel = command.substring(speedIndex + 6);
+    speedLevel.trim();
+    setSpeed(speedLevel);
+    return;
   }
   
-  // Auto stop after 2 seconds
-  delay(2000);
-  stop_motor();
-  Serial.println("[MOTOR] Auto stopped");
+  // Update current command
+  if (command != currentCommand) {
+    Serial.print("[CMD] ");
+    Serial.print(currentCommand);
+    Serial.print(" -> ");
+    Serial.println(command);
+    
+    currentCommand = command;
+    commandStartTime = millis();
+    
+    // Execute immediately for real-time response
+    executeCommand(currentCommand);
+  }
 }
 
-void sendPositionData() {
+void sendSensorData() {
   if (!esp_now_initialized) return;
   
+  // Send sensor data every 100ms for real-time feedback
   snprintf(outgoing.text, sizeof(outgoing.text), 
-           "POS:50.0,50.0,0.0|S:%.1f,%.1f,%.1f,%.1f", 
+           "SENSORS:%.1f,%.1f,%.1f,%.1f|CMD:%s|SPEED:%d", 
            sensor_distances[0], sensor_distances[1], 
-           sensor_distances[2], sensor_distances[3]);
+           sensor_distances[2], sensor_distances[3],
+           currentCommand.c_str(), currentSpeed);
   
-  esp_err_t result = esp_now_send(controllerAddress, (uint8_t*)&outgoing, sizeof(outgoing));
-  if (result == ESP_OK) {
-    Serial.println("[ESP-NOW] Position data sent");
-  }
+  esp_now_send(controllerAddress, (uint8_t*)&outgoing, sizeof(outgoing));
 }
 
 void setup() {
   Serial.begin(115200);
-  delay(2000);  // Give more time for startup
+  delay(1000);  // Reduced startup delay
   
   Serial.println("================================");
-  Serial.println("  Minimal Robot Test");
+  Serial.println("  Real-time Robot Control");
   Serial.println("================================");
   
   // Initialize pins
-  Serial.println("[SETUP] Initializing pins...");
-  
-  // Motor pins
   pinMode(MOTOR_FRONT_A1, OUTPUT);
   pinMode(MOTOR_FRONT_A2, OUTPUT);
   pinMode(MOTOR_FRONT_B1, OUTPUT);
@@ -213,7 +279,6 @@ void setup() {
   pinMode(MOTOR_BACK_B1, OUTPUT);
   pinMode(MOTOR_BACK_B2, OUTPUT);
   stop_motor();
-  Serial.println("[MOTOR] Initialized");
   
   // Ultrasonic pins
   pinMode(TRIG_PIN, OUTPUT);
@@ -227,20 +292,11 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(ECHO2_PIN), echo2ISR, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ECHO3_PIN), echo3ISR, CHANGE);
   attachInterrupt(digitalPinToInterrupt(ECHO4_PIN), echo4ISR, CHANGE);
-  Serial.println("[ULTRASONIC] Initialized");
   
   // Initialize WiFi and ESP-NOW
-  Serial.println("[SETUP] Initializing ESP-NOW...");
   WiFi.mode(WIFI_STA);
-  Serial.print("[WIFI] Robot MAC: ");
-  Serial.println(WiFi.macAddress());
   
-  if (esp_now_init() != ESP_OK) {
-    Serial.println("[ESP-NOW] Init failed!");
-    esp_now_initialized = false;
-  } else {
-    Serial.println("[ESP-NOW] Init success");
-    
+  if (esp_now_init() == ESP_OK) {
     esp_now_register_send_cb(onDataSent);
     esp_now_register_recv_cb(onDataRecv);
     
@@ -249,44 +305,49 @@ void setup() {
     peerInfo.channel = 0;
     peerInfo.encrypt = false;
     
-    if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-      Serial.println("[ESP-NOW] Add peer failed!");
-      esp_now_initialized = false;
-    } else {
-      Serial.print("[ESP-NOW] Added controller: ");
-      for (int i = 0; i < 6; i++) {
-        Serial.printf("%02X", controllerAddress[i]);
-        if (i < 5) Serial.print(":");
-      }
-      Serial.println();
+    if (esp_now_add_peer(&peerInfo) == ESP_OK) {
       esp_now_initialized = true;
+      Serial.println("[ESP-NOW] Ready");
     }
   }
   
-  // LED indicator
   pinMode(2, OUTPUT);
   
   Serial.println("================================");
-  Serial.println("[READY] Robot ready for commands!");
-  Serial.println("Expected controller: 7C:87:CE:2F:E3:20");
-  Serial.printf("[STATUS] ESP-NOW: %s\n", esp_now_initialized ? "OK" : "FAILED");
+  Serial.println("[READY] Real-time control active!");
+  Serial.printf("[SPEED] Current: %d (slow:%d, normal:%d, fast:%d)\n", 
+                currentSpeed, SPEED_SLOW, SPEED_NORMAL, SPEED_FAST);
+  Serial.println("Commands: forward, backward, left, right, strafe_left, strafe_right, stop");
+  Serial.println("Speed commands: speed:slow, speed:normal, speed:fast");
   Serial.println("================================");
 }
 
 void loop() {
   unsigned long now = millis();
   
-  // Blink LED to show robot is alive
+  // Fast LED blink for activity indicator
   static bool ledState = false;
   static unsigned long lastBlink = 0;
-  if (now - lastBlink >= 1000) {
+  if (now - lastBlink >= 200) {  // Faster blink
     lastBlink = now;
     ledState = !ledState;
     digitalWrite(2, ledState);
   }
   
-  // Trigger ultrasonic sensors
-  if (now - lastTriggerTime >= 200) {
+  // Auto-stop if no command received for 1 second (safety feature)
+  if (currentCommand != "stop" && (now - lastCommandTime > 1000)) {
+    Serial.println("[SAFETY] Auto-stop - no commands");
+    currentCommand = "stop";
+    stop_motor();
+  }
+  
+  // Continue executing current command
+  if (currentCommand != "stop") {
+    executeCommand(currentCommand);
+  }
+  
+  // Trigger ultrasonic sensors more frequently
+  if (now - lastTriggerTime >= 50) {  // 50ms = 20Hz
     lastTriggerTime = now;
     digitalWrite(TRIG_PIN, HIGH);
     delayMicroseconds(10);
@@ -307,22 +368,24 @@ void loop() {
       } else {
         sensor_distances[i] = 999.0;
       }
-      
-      Serial.print("Sensor ");
-      Serial.print(i + 1);
-      Serial.print(": ");
-      Serial.print(sensor_distances[i]);
-      Serial.println(" cm");
     }
   }
   
-  // Send status every 5 seconds
-  if (now - lastStatusTime >= 5000) {
-    lastStatusTime = now;
-    Serial.printf("[STATUS] Uptime: %lu ms, ESP-NOW: %s\n", 
-                  now, esp_now_initialized ? "OK" : "FAILED");
-    sendPositionData();
+  // Send sensor data every 100ms for real-time feedback
+  if (now - lastSensorSendTime >= 100) {
+    lastSensorSendTime = now;
+    sendSensorData();
   }
   
-  delay(10);
+  // Status every 5 seconds
+  if (now - lastStatusTime >= 5000) {
+    lastStatusTime = now;
+    Serial.printf("[STATUS] CMD:%s, SPEED:%d, SENSORS:%.1f,%.1f,%.1f,%.1f\n", 
+                  currentCommand.c_str(), currentSpeed,
+                  sensor_distances[0], sensor_distances[1], 
+                  sensor_distances[2], sensor_distances[3]);
+  }
+  
+  // Minimal delay for maximum responsiveness
+  delay(5);
 }
