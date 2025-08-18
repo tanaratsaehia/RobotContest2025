@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Real-time Robot Controller - Compatible with Real-time Robot System
-Fixed for real-time SENSORS data format
+Real-time Robot Controller with Servo Control - Fixed Stop Command
+Enhanced version with reliable X key stop command and servo control
 """
 
 import serial
@@ -24,23 +24,25 @@ class RealTimeRobotController:
         self.sensor_data = [0.0, 0.0, 0.0, 0.0]
         self.current_command = "stop"
         self.current_speed = "normal"
+        self.servo_angle = 90  # Default servo position
         
-        # Enhanced patterns for real-time system
-        # SENSORS:10.5,25.3,15.2,30.1|CMD:forward|SPEED:120
-        self.realtime_pattern = re.compile(r"SENSORS:([\d.-]+),([\d.-]+),([\d.-]+),([\d.-]+)\|CMD:(\w+)\|SPEED:(\d+)")
+        # Enhanced patterns for real-time system with servo support
+        # SENSORS:10.5,25.3,15.2,30.1|CMD:forward|SPEED:120|SERVO:90
+        self.realtime_pattern = re.compile(r"SENSORS:([\d.-]+),([\d.-]+),([\d.-]+),([\d.-]+)\|CMD:(\w+)\|SPEED:(\d+)(?:\|SERVO:(\d+))?")
         
         # Legacy patterns for backward compatibility
         self.robot_pattern = re.compile(r"\[ROBOT\]\s*POS:([\d.-]+),([\d.-]+),([\d.-]+)\|S:([\d.-]+),([\d.-]+),([\d.-]+),([\d.-]+)")
         self.pos_pattern = re.compile(r"POS:([\d.-]+),([\d.-]+),([\d.-]+)\|S:([\d.-]+),([\d.-]+),([\d.-]+),([\d.-]+)")
         self.sensor_pattern = re.compile(r"Sensor\s*(\d+)\s*.*?:\s*([\d.-]+)\s*cm", re.I)
+        self.servo_pattern = re.compile(r"SERVO:\s*(\d+)", re.I)
         
         self.setup_gui()
         self.running = True
         
     def setup_gui(self):
         self.root = tk.Tk()
-        self.root.title("🤖 Real-time Robot Controller")
-        self.root.geometry("500x750")
+        self.root.title("🤖 Real-time Robot Controller with Servo")
+        self.root.geometry("520x900")  # เพิ่มความสูงสำหรับ servo controls
         self.root.configure(bg='#f0f0f0')
         
         # Connection Frame
@@ -60,18 +62,18 @@ class RealTimeRobotController:
         self.status_label = ttk.Label(conn_frame, text="❌ Disconnected", foreground="red", font=("Arial", 10, "bold"))
         self.status_label.pack(pady=(5,0))
         
-        # Real-time Controls
-        control_frame = ttk.LabelFrame(self.root, text="🎮 Real-time Control", padding="10")
+        # Real-time Movement Controls
+        control_frame = ttk.LabelFrame(self.root, text="🎮 Movement Control", padding="10")
         control_frame.pack(fill="x", padx=10, pady=5)
         
-        # Movement buttons
+        # Movement buttons - เปลี่ยน Stop กลับเป็น X
         btn_frame = ttk.Frame(control_frame)
         btn_frame.pack(pady=5)
         
         # Top row
         ttk.Button(btn_frame, text="⬆️ Forward (W)", command=lambda: self.send_cmd("w"), width=15).grid(row=0, column=1, padx=2, pady=2)
         
-        # Middle row  
+        # Middle row - เปลี่ยนจาก SPACE กลับเป็น X  
         ttk.Button(btn_frame, text="↩️ Left (A)", command=lambda: self.send_cmd("a"), width=15).grid(row=1, column=0, padx=2, pady=2)
         ttk.Button(btn_frame, text="⏹️ Stop (X)", command=lambda: self.send_cmd("x"), width=15).grid(row=1, column=1, padx=2, pady=2)
         ttk.Button(btn_frame, text="↪️ Right (D)", command=lambda: self.send_cmd("d"), width=15).grid(row=1, column=2, padx=2, pady=2)
@@ -85,6 +87,41 @@ class RealTimeRobotController:
         
         ttk.Button(strafe_frame, text="⬅️ Strafe L (Q)", command=lambda: self.send_cmd("q"), width=15).pack(side="left", padx=2)
         ttk.Button(strafe_frame, text="➡️ Strafe R (E)", command=lambda: self.send_cmd("e"), width=15).pack(side="left", padx=2)
+        
+        # Servo Control Frame - ปรับคำสั่ง servo เนื่องจาก X ถูกใช้เป็น Stop แล้ว
+        servo_frame = ttk.LabelFrame(self.root, text="🦾 Servo Control (Drop Mechanism)", padding="10")
+        servo_frame.pack(fill="x", padx=10, pady=5)
+        
+        # Current servo position display
+        self.servo_status_label = ttk.Label(servo_frame, text="Current Position: 90°", font=("Arial", 11, "bold"), foreground="navy")
+        self.servo_status_label.pack(pady=(0,10))
+        
+        # Direction control buttons
+        direction_frame = ttk.Frame(servo_frame)
+        direction_frame.pack(pady=5)
+        
+        ttk.Button(direction_frame, text="⬅️ Turn Left (Z)", command=lambda: self.send_servo_cmd("left"), width=15).pack(side="left", padx=5)
+        ttk.Button(direction_frame, text="🎯 Center (C)", command=lambda: self.send_servo_cmd("center"), width=15).pack(side="left", padx=5)
+        ttk.Button(direction_frame, text="➡️ Turn Right (V)", command=lambda: self.send_servo_cmd("right"), width=15).pack(side="left", padx=5)
+        
+        # Drop control buttons - เปลี่ยนจาก X เป็น B สำหรับ Drop
+        drop_frame = ttk.Frame(servo_frame)
+        drop_frame.pack(pady=10)
+        
+        ttk.Button(drop_frame, text="📦 Drop Object (B)", command=lambda: self.send_servo_cmd("drop"), width=20).pack(side="left", padx=5)
+        ttk.Button(drop_frame, text="🔄 Reset Position (R)", command=lambda: self.send_servo_cmd("reset"), width=20).pack(side="left", padx=5)
+        
+        # Fine control with slider
+        slider_frame = ttk.Frame(servo_frame)
+        slider_frame.pack(fill="x", pady=10)
+        
+        ttk.Label(slider_frame, text="Fine Control:").pack(anchor="w")
+        
+        self.servo_var = tk.IntVar(value=90)
+        self.servo_scale = tk.Scale(slider_frame, from_=0, to=180, orient="horizontal", 
+                                   variable=self.servo_var, command=self.on_servo_scale_change,
+                                   length=300, resolution=10)
+        self.servo_scale.pack(fill="x", pady=5)
         
         # Speed Control
         speed_frame = ttk.LabelFrame(self.root, text="⚡ Speed Control", padding="10")
@@ -122,7 +159,7 @@ class RealTimeRobotController:
         self.cmd_label = ttk.Label(cmd_frame, text="Command: stop", font=("Arial", 11, "bold"), foreground="blue")
         self.cmd_label.pack(anchor="w")
         
-        self.robot_speed_label = ttk.Label(cmd_frame, text="Robot Speed: 120", font=("Arial", 11, "bold"), foreground="green")
+        self.robot_speed_label = ttk.Label(cmd_frame, text="Robot Speed: 140", font=("Arial", 11, "bold"), foreground="green")
         self.robot_speed_label.pack(anchor="w")
         
         # Sensor Display
@@ -151,28 +188,91 @@ class RealTimeRobotController:
         console_container = ttk.Frame(console_frame)
         console_container.pack(fill="both", expand=True)
         
-        self.console = tk.Text(console_container, height=12, font=("Consolas", 9), wrap="word")
+        self.console = tk.Text(console_container, height=10, font=("Consolas", 9), wrap="word")
         scroll = ttk.Scrollbar(console_container, command=self.console.yview)
         self.console.config(yscrollcommand=scroll.set)
         
         self.console.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
         
-        # Bind keyboard events
+        # Updated keyboard bindings - เปลี่ยนกลับไปใช้ X สำหรับ Stop
         self.root.bind('<KeyPress>', self.on_key_press)
         self.root.focus_set()
         
     def on_key_press(self, event):
-        """Handle keyboard input for real-time control"""
+        """Handle keyboard input for real-time control - Updated with X for stop"""
         key = event.char.lower()
-        key_mappings = {
+        
+        # Movement controls - X กลับมาเป็น Stop แล้ว
+        movement_mappings = {
             'w': 'w', 's': 's', 'a': 'a', 'd': 'd',
-            'q': 'q', 'e': 'e', 'x': 'x',
+            'q': 'q', 'e': 'e', 'x': 'x',  # X สำหรับ Stop
             '1': '1', '2': '2', '3': '3'
         }
         
-        if key in key_mappings:
-            self.send_cmd(key_mappings[key])
+        # Servo controls - เปลี่ยน Drop จาก X เป็น B
+        servo_mappings = {
+            'z': 'left',    # Turn servo left
+            'c': 'center',  # Center servo
+            'v': 'right',   # Turn servo right
+            'b': 'drop',    # Drop object (เปลี่ยนจาก X เป็น B)
+            'r': 'reset'    # Reset servo position
+        }
+        
+        if key in movement_mappings:
+            self.send_cmd(movement_mappings[key])
+        elif key in servo_mappings:
+            self.send_servo_cmd(servo_mappings[key])
+        
+    def on_servo_scale_change(self, value):
+        """Handle servo slider changes"""
+        angle = int(value)
+        self.send_servo_angle(angle)
+        
+    def send_servo_cmd(self, servo_command):
+        """Send servo command with predefined positions"""
+        servo_commands = {
+            'left': 45,      # Turn left position
+            'center': 90,    # Center position  
+            'right': 135,    # Turn right position
+            'drop': 180,     # Full drop position
+            'reset': 90      # Reset to center
+        }
+        
+        if servo_command in servo_commands:
+            angle = servo_commands[servo_command]
+            self.send_servo_angle(angle)
+            
+            # Update display names for better user feedback
+            display_names = {
+                'left': '⬅️ Turn Left',
+                'center': '🎯 Center',
+                'right': '➡️ Turn Right', 
+                'drop': '📦 Drop Object',
+                'reset': '🔄 Reset Position'
+            }
+            
+            self.log(f"Servo Command: {display_names.get(servo_command, servo_command)} ({angle}°)", "SERVO")
+        
+    def send_servo_angle(self, angle):
+        """Send specific servo angle command"""
+        if self.connected and self.ser:
+            try:
+                # Send servo command in format: servo:angle
+                command = f"servo:{angle}"
+                self.ser.write((command + '\n').encode())
+                
+                # Update local servo position
+                self.servo_angle = angle
+                self.servo_var.set(angle)
+                self.servo_status_label.config(text=f"Current Position: {angle}°")
+                
+                self.log(f"Servo moved to {angle}°", "SERVO")
+                
+            except Exception as e:
+                self.log(f"Servo command error: {e}", "ERROR")
+        else:
+            self.log("Cannot send servo command - not connected!", "ERROR")
         
     def log(self, msg, tag="INFO"):
         """Log message to console with colors"""
@@ -182,7 +282,7 @@ class RealTimeRobotController:
         self.console.insert(tk.END, full_msg)
         self.console.see(tk.END)
         
-        # Color coding
+        # Enhanced color coding including servo
         colors = {
             "ERROR": "red",
             "SENSOR": "blue", 
@@ -190,7 +290,8 @@ class RealTimeRobotController:
             "COMMAND": "purple",
             "SPEED": "orange",
             "STATUS": "navy",
-            "SUCCESS": "darkgreen"
+            "SUCCESS": "darkgreen",
+            "SERVO": "darkred"  # New color for servo commands
         }
         
         color = colors.get(tag, "black")
@@ -226,7 +327,7 @@ class RealTimeRobotController:
             self.data_thread.start()
             
             self.log(f"Connected to {port}", "SUCCESS")
-            self.log("Use WASD keys for movement, 123 for speed", "INFO")
+            self.log("Movement: WASD+X for stop, Speed: 123, Servo: ZCVBR", "INFO")
             
         except Exception as e:
             self.log(f"Connection failed: {e}", "ERROR")
@@ -247,10 +348,10 @@ class RealTimeRobotController:
             try:
                 self.ser.write((command + '\n').encode())
                 
-                # Map commands for display
+                # Map commands for display - อัปเดตเพื่อแสดง X เป็น Stop
                 cmd_names = {
                     'w': 'Forward', 's': 'Backward', 'a': 'Turn Left', 'd': 'Turn Right',
-                    'q': 'Strafe Left', 'e': 'Strafe Right', 'x': 'Stop',
+                    'q': 'Strafe Left', 'e': 'Strafe Right', 'x': 'Stop',  # X เป็น Stop แล้ว
                     '1': 'Speed Slow', '2': 'Speed Normal', '3': 'Speed Fast'
                 }
                 
@@ -264,7 +365,7 @@ class RealTimeRobotController:
             
     def read_data(self):
         """Read data from serial port"""
-        self.log("Started real-time data reading", "INFO")
+        self.log("Started real-time data reading with servo support", "INFO")
         
         while self.running and self.connected and self.ser:
             try:
@@ -278,9 +379,9 @@ class RealTimeRobotController:
                 break
                 
     def process_data(self, line):
-        """Process incoming data with real-time format support"""
+        """Process incoming data with real-time format support including servo"""
         
-        # Try real-time format first: SENSORS:10.5,25.3,15.2,30.1|CMD:forward|SPEED:120
+        # Try enhanced real-time format: SENSORS:10.5,25.3,15.2,30.1|CMD:forward|SPEED:120|SERVO:90
         realtime_match = self.realtime_pattern.search(line)
         if realtime_match:
             try:
@@ -292,18 +393,32 @@ class RealTimeRobotController:
                 ]
                 command = realtime_match.group(5)
                 speed = int(realtime_match.group(6))
+                servo_angle = int(realtime_match.group(7)) if realtime_match.group(7) else self.servo_angle
                 
                 # Update data
                 self.sensor_data = sensors
                 self.current_command = command
+                self.servo_angle = servo_angle
                 
                 # Update GUI
-                self.root.after(0, lambda: self.update_realtime_gui(command, speed))
+                self.root.after(0, lambda: self.update_realtime_gui(command, speed, servo_angle))
                 
                 return
                 
             except ValueError as e:
                 self.log(f"Parse error (realtime): {e}", "ERROR")
+        
+        # Handle servo status messages
+        servo_match = self.servo_pattern.search(line)
+        if servo_match:
+            try:
+                servo_angle = int(servo_match.group(1))
+                self.servo_angle = servo_angle
+                self.root.after(0, lambda: self.update_servo_gui(servo_angle))
+                self.log(f"Servo position updated: {servo_angle}°", "SERVO")
+                return
+            except ValueError as e:
+                self.log(f"Servo parse error: {e}", "ERROR")
         
         # Handle individual sensor readings: Sensor 1: 25.3 cm
         sensor_match = self.sensor_pattern.search(line)
@@ -326,12 +441,13 @@ class RealTimeRobotController:
             except (ValueError, IndexError) as e:
                 self.log(f"Sensor parse error: {e}", "ERROR")
         
-        # Log important system messages
-        important_keywords = ['[✓]', '[✗]', '[ERROR]', '[READY]', '[STATUS]', '[SPEED]', '[CMD]', 'Speed set to']
+        # Log important system messages including servo messages
+        important_keywords = ['[✓]', '[✗]', '[ERROR]', '[READY]', '[STATUS]', '[SPEED]', '[CMD]', '[SERVO]', 'Speed set to', 'Servo']
         if any(keyword in line for keyword in important_keywords):
-            # Extract the important part
             if 'Speed set to' in line:
                 self.log(line, "SPEED")
+            elif '[SERVO]' in line or 'Servo' in line:
+                self.log(line, "SERVO")
             elif '[✓]' in line or '[READY]' in line:
                 self.log(line, "SUCCESS")  
             elif '[✗]' in line or '[ERROR]' in line:
@@ -339,8 +455,8 @@ class RealTimeRobotController:
             else:
                 self.log(line, "STATUS")
                 
-    def update_realtime_gui(self, command, speed):
-        """Update GUI with real-time data"""
+    def update_realtime_gui(self, command, speed, servo_angle=None):
+        """Update GUI with real-time data including servo position"""
         try:
             # Update command display
             self.cmd_label.config(text=f"Command: {command}")
@@ -349,10 +465,10 @@ class RealTimeRobotController:
             self.robot_speed_label.config(text=f"Robot Speed: {speed}")
             
             # Update speed label based on speed value
-            if speed <= 80:
+            if speed <= 110:
                 speed_text = "🐌 Slow"
                 self.current_speed = "slow"
-            elif speed <= 120:
+            elif speed <= 150:
                 speed_text = "🚶 Normal"  
                 self.current_speed = "normal"
             else:
@@ -361,11 +477,24 @@ class RealTimeRobotController:
                 
             self.speed_label.config(text=f"Current Speed: {speed_text}")
             
+            # Update servo if provided
+            if servo_angle is not None:
+                self.update_servo_gui(servo_angle)
+            
             # Update sensors
             self.update_sensors_gui()
             
         except Exception as e:
             self.log(f"GUI update error: {e}", "ERROR")
+    
+    def update_servo_gui(self, angle):
+        """Update servo display"""
+        try:
+            self.servo_angle = angle
+            self.servo_var.set(angle)
+            self.servo_status_label.config(text=f"Current Position: {angle}°")
+        except Exception as e:
+            self.log(f"Servo GUI update error: {e}", "ERROR")
             
     def update_sensors_gui(self):
         """Update sensor display"""
@@ -407,8 +536,9 @@ class RealTimeRobotController:
             
     def run(self):
         """Start the application"""
-        self.log("🚀 Real-time Robot Controller Started", "SUCCESS")
-        self.log("Connect to your robot and use WASD keys!", "INFO")
+        self.log("🚀 Real-time Robot Controller with Servo Started", "SUCCESS")
+        self.log("🎮 Controls: WASD=Move, X=Stop, 123=Speed, ZCVBR=Servo", "INFO")
+        self.log("📦 Servo: Z=Left, C=Center, V=Right, B=Drop, R=Reset", "INFO")
         
         try:
             self.root.mainloop()
