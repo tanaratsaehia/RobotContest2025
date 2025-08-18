@@ -1,4 +1,5 @@
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 import serial
 import sys
 import threading
@@ -287,3 +288,630 @@ def main():
 
 if __name__ == "__main__":
     main()
+=======
+#!/usr/bin/env python3
+"""
+Complete Autonomous Robot Mapping Controller
+Robot Contest 2025 [Robot Team]
+"""
+
+import serial
+import sys
+import threading
+import re
+import time
+import tkinter as tk
+from tkinter import ttk, messagebox
+import json
+from datetime import datetime
+
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
+    import numpy as np
+    from matplotlib.animation import FuncAnimation
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+    print("Warning: matplotlib/numpy not available. Map visualization disabled.")
+
+# Configuration for Windows
+SERIAL_PORTS = ['COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9', 'COM10']
+BAUD_RATE = 115200
+
+# Mapping parameters
+MAP_SIZE = 100
+GRID_SIZE = 10  # cm per grid cell
+
+class AutoMappingController:
+    def __init__(self):
+        self.ser = None
+        self.connected = False
+        self.mapping_active = False
+        
+        # Map data
+        if MATPLOTLIB_AVAILABLE:
+            self.occupancy_map = np.full((MAP_SIZE, MAP_SIZE), -1, dtype=np.int8)
+        else:
+            self.occupancy_map = [[-1 for _ in range(MAP_SIZE)] for _ in range(MAP_SIZE)]
+        
+        self.robot_pos = [MAP_SIZE//2, MAP_SIZE//2]
+        self.robot_heading = 0.0
+        self.sensor_data = [0.0, 0.0, 0.0, 0.0]
+        self.path_history = []
+        
+        # Data parsing
+        self.position_pattern = re.compile(r"POS:([\d.-]+),([\d.-]+),([\d.-]+)\|S:([\d.-]+),([\d.-]+),([\d.-]+),([\d.-]+)")
+        self.sensor_pattern = re.compile(r"Sensor\s*(\d+)\s*:\s*([\d.-]+)\s*cm", re.I)
+        
+        # GUI
+        self.setup_gui()
+        
+        if MATPLOTLIB_AVAILABLE:
+            self.setup_plot()
+        
+        # Start data reading thread
+        self.running = True
+        self.data_thread = None
+        
+    def setup_gui(self):
+        self.root = tk.Tk()
+        self.root.title("Autonomous Robot Mapping Controller")
+        self.root.geometry("500x700")
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # Title
+        title_label = tk.Label(self.root, text="Robot Mapping Controller", 
+                              font=("Arial", 16, "bold"), fg="blue")
+        title_label.pack(pady=10)
+        
+        # Connection frame
+        conn_frame = ttk.LabelFrame(self.root, text="Connection", padding="10")
+        conn_frame.pack(fill="x", padx=10, pady=5)
+        
+        ttk.Label(conn_frame, text="COM Port:").pack(anchor="w")
+        self.port_var = tk.StringVar(value="COM3")
+        port_combo = ttk.Combobox(conn_frame, textvariable=self.port_var, values=SERIAL_PORTS, width=15)
+        port_combo.pack(pady=2)
+        
+        self.connect_btn = ttk.Button(conn_frame, text="Connect", command=self.toggle_connection)
+        self.connect_btn.pack(pady=5)
+        
+        self.status_label = ttk.Label(conn_frame, text="Status: Disconnected", foreground="red")
+        self.status_label.pack()
+        
+        # Control frame
+        control_frame = ttk.LabelFrame(self.root, text="Robot Control", padding="10")
+        control_frame.pack(fill="x", padx=10, pady=5)
+        
+        # Mapping controls
+        mapping_frame = ttk.Frame(control_frame)
+        mapping_frame.pack(fill="x", pady=5)
+        
+        self.start_mapping_btn = ttk.Button(mapping_frame, text="Start Auto Mapping", 
+                                          command=self.start_autonomous_mapping)
+        self.start_mapping_btn.pack(side="left", padx=2)
+        
+        self.stop_mapping_btn = ttk.Button(mapping_frame, text="Stop Mapping", 
+                                         command=self.stop_autonomous_mapping)
+        self.stop_mapping_btn.pack(side="left", padx=2)
+        
+        # Manual controls
+        manual_frame = ttk.LabelFrame(control_frame, text="Manual Control", padding="5")
+        manual_frame.pack(fill="x", pady=5)
+        
+        # Direction buttons
+        dir_frame = ttk.Frame(manual_frame)
+        dir_frame.pack()
+        
+        ttk.Button(dir_frame, text="↑", command=lambda: self.send_command("w"), width=3).grid(row=0, column=1, padx=2, pady=2)
+        ttk.Button(dir_frame, text="←", command=lambda: self.send_command("a"), width=3).grid(row=1, column=0, padx=2, pady=2)
+        ttk.Button(dir_frame, text="■", command=lambda: self.send_command("x"), width=3).grid(row=1, column=1, padx=2, pady=2)
+        ttk.Button(dir_frame, text="→", command=lambda: self.send_command("d"), width=3).grid(row=1, column=2, padx=2, pady=2)
+        ttk.Button(dir_frame, text="↓", command=lambda: self.send_command("s"), width=3).grid(row=2, column=1, padx=2, pady=2)
+        
+        # Status frame
+        status_frame = ttk.LabelFrame(self.root, text="Robot Status", padding="10")
+        status_frame.pack(fill="x", padx=10, pady=5)
+        
+        self.position_label = ttk.Label(status_frame, text="Position: (50, 50)")
+        self.position_label.pack(anchor="w")
+        
+        self.heading_label = ttk.Label(status_frame, text="Heading: 0°")
+        self.heading_label.pack(anchor="w")
+        
+        self.mapping_status_label = ttk.Label(status_frame, text="Mapping: Inactive")
+        self.mapping_status_label.pack(anchor="w")
+        
+        # Sensor data frame
+        sensor_frame = ttk.LabelFrame(self.root, text="Ultrasonic Sensors", padding="10")
+        sensor_frame.pack(fill="x", padx=10, pady=5)
+        
+        self.sensor_labels = []
+        sensor_names = ["Front", "Right", "Back", "Left"]
+        for i, name in enumerate(sensor_names):
+            label = ttk.Label(sensor_frame, text=f"{name}: -- cm")
+            label.pack(anchor="w")
+            self.sensor_labels.append(label)
+        
+        # Map controls
+        map_frame = ttk.LabelFrame(self.root, text="Map Controls", padding="10")
+        map_frame.pack(fill="x", padx=10, pady=5)
+        
+        map_btn_frame = ttk.Frame(map_frame)
+        map_btn_frame.pack(fill="x")
+        
+        if MATPLOTLIB_AVAILABLE:
+            ttk.Button(map_btn_frame, text="Show Map", command=self.show_map).pack(side="left", padx=2)
+        
+        ttk.Button(map_btn_frame, text="Clear Map", command=self.clear_map).pack(side="left", padx=2)
+        ttk.Button(map_btn_frame, text="Save Map", command=self.save_map).pack(side="left", padx=2)
+        
+        # Console frame
+        console_frame = ttk.LabelFrame(self.root, text="Console", padding="10")
+        console_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        
+        # Console text area
+        console_scroll = ttk.Scrollbar(console_frame)
+        console_scroll.pack(side="right", fill="y")
+        
+        self.console_text = tk.Text(console_frame, height=8, yscrollcommand=console_scroll.set, 
+                                   font=("Consolas", 9))
+        self.console_text.pack(fill="both", expand=True)
+        console_scroll.config(command=self.console_text.yview)
+        
+        # Control instructions
+        instructions = """
+        Controls:
+        W/↑ - Forward    S/↓ - Backward
+        A/← - Turn Left  D/→ - Turn Right
+        X/■ - Stop       M - Toggle Auto Mapping
+        """
+        
+        instr_frame = ttk.LabelFrame(self.root, text="Instructions", padding="5")
+        instr_frame.pack(fill="x", padx=10, pady=5)
+        
+        instr_label = ttk.Label(instr_frame, text=instructions, font=("Arial", 8))
+        instr_label.pack()
+        
+        # Keyboard binding
+        self.root.bind('<KeyPress>', self.on_key_press)
+        self.root.focus_set()
+        
+    def setup_plot(self):
+        if not MATPLOTLIB_AVAILABLE:
+            return
+            
+        self.fig, self.ax = plt.subplots(figsize=(10, 10))
+        self.ax.set_xlim(0, MAP_SIZE)
+        self.ax.set_ylim(0, MAP_SIZE)
+        self.ax.set_aspect('equal')
+        self.ax.set_title('Robot Autonomous Mapping')
+        self.ax.set_xlabel('X (grid cells, 10cm each)')
+        self.ax.set_ylabel('Y (grid cells, 10cm each)')
+        self.ax.grid(True, alpha=0.3)
+        
+        # Initialize plot elements
+        self.map_image = self.ax.imshow(self.occupancy_map.T, origin='lower', cmap='RdYlBu_r', 
+                                       vmin=-1, vmax=1, alpha=0.8)
+        self.robot_marker, = self.ax.plot([], [], 'ro', markersize=8, label='Robot')
+        self.robot_direction, = self.ax.plot([], [], 'r-', linewidth=2)
+        self.path_line, = self.ax.plot([], [], 'b-', alpha=0.5, linewidth=1, label='Path')
+        self.sensor_lines = [self.ax.plot([], [], 'g--', alpha=0.7)[0] for _ in range(4)]
+        
+        self.ax.legend()
+        plt.tight_layout()
+        
+    def log_message(self, message):
+        """Add message to console"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        full_message = f"[{timestamp}] {message}\n"
+        
+        self.console_text.insert(tk.END, full_message)
+        self.console_text.see(tk.END)
+        
+        # Keep only last 1000 lines
+        lines = self.console_text.get("1.0", tk.END).split('\n')
+        if len(lines) > 1000:
+            self.console_text.delete("1.0", f"{len(lines)-1000}.0")
+        
+        print(full_message.strip())  # Also print to stdout
+        
+    def toggle_connection(self):
+        if self.connected:
+            self.disconnect()
+        else:
+            self.connect()
+            
+    def connect(self):
+        try:
+            port = self.port_var.get()
+            self.log_message(f"Attempting to connect to {port}...")
+            
+            self.ser = serial.Serial(port, BAUD_RATE, timeout=1, dsrdtr=False)
+            time.sleep(2)  # Wait for ESP32 to reset
+            
+            self.connected = True
+            self.connect_btn.config(text="Disconnect")
+            self.status_label.config(text="Status: Connected", foreground="green")
+            
+            # Start data reading thread
+            if self.data_thread is None or not self.data_thread.is_alive():
+                self.data_thread = threading.Thread(target=self.read_serial_data, daemon=True)
+                self.data_thread.start()
+                
+            self.log_message(f"✓ Connected to {port}")
+            
+        except Exception as e:
+            self.log_message(f"✗ Connection failed: {str(e)}")
+            messagebox.showerror("Connection Error", f"Failed to connect to {self.port_var.get()}:\n{str(e)}")
+            
+    def disconnect(self):
+        try:
+            if self.ser and self.ser.is_open:
+                self.ser.close()
+            self.ser = None
+            self.connected = False
+            self.connect_btn.config(text="Connect")
+            self.status_label.config(text="Status: Disconnected", foreground="red")
+            self.log_message("Disconnected from robot")
+        except Exception as e:
+            self.log_message(f"Error during disconnect: {e}")
+        
+    def send_command(self, command):
+        if self.connected and self.ser and self.ser.is_open:
+            try:
+                self.ser.write((command + '\n').encode())
+                self.log_message(f"→ Sent: {command}")
+            except Exception as e:
+                self.log_message(f"✗ Send error: {e}")
+        else:
+            self.log_message("✗ Not connected to robot")
+                
+    def start_autonomous_mapping(self):
+        if self.connected:
+            self.send_command("start_mapping")
+            self.mapping_active = True
+            self.mapping_status_label.config(text="Mapping: Active", foreground="green")
+            self.log_message("🤖 Started autonomous mapping")
+        else:
+            self.log_message("✗ Connect to robot first")
+            
+    def stop_autonomous_mapping(self):
+        if self.connected:
+            self.send_command("stop_mapping")
+            self.mapping_active = False
+            self.mapping_status_label.config(text="Mapping: Inactive", foreground="red")
+            self.log_message("⏹ Stopped autonomous mapping")
+        else:
+            self.log_message("✗ Connect to robot first")
+            
+    def read_serial_data(self):
+        self.log_message("📡 Started data reading thread")
+        
+        while self.running and self.connected and self.ser and self.ser.is_open:
+            try:
+                if self.ser.in_waiting > 0:
+                    line = self.ser.readline().decode('utf-8', errors='ignore').strip()
+                    if line:
+                        self.process_serial_data(line)
+                time.sleep(0.01)
+            except Exception as e:
+                self.log_message(f"✗ Serial read error: {e}")
+                break
+                
+        self.log_message("📡 Data reading thread stopped")
+                
+    def process_serial_data(self, line):
+        # Skip debug messages but log them
+        if any(keyword in line for keyword in ['[SETUP]', '[IMU]', '[ESP32]', '[AUTO]', '[STATUS]', '[READY]']):
+            self.log_message(f"🤖 {line}")
+            return
+            
+        if line.startswith('[') or 'Button state' in line or 'gyro:' in line:
+            return
+            
+        # Parse position and sensor data
+        pos_match = self.position_pattern.search(line)
+        if pos_match:
+            try:
+                x, y, heading = float(pos_match.group(1)), float(pos_match.group(2)), float(pos_match.group(3))
+                sensors = [float(pos_match.group(i)) for i in range(4, 8)]
+                
+                self.robot_pos = [x, y]
+                self.robot_heading = heading
+                self.sensor_data = sensors
+                
+                # Add to path history
+                self.path_history.append((x, y))
+                if len(self.path_history) > 1000:
+                    self.path_history = self.path_history[-1000:]
+                
+                # Update map based on sensor data
+                if MATPLOTLIB_AVAILABLE:
+                    self.update_map_from_sensors()
+                
+                # Update GUI labels
+                self.root.after(0, self.update_gui_labels)
+                
+            except ValueError as e:
+                self.log_message(f"✗ Position parse error: {e}")
+                
+        # Parse individual sensor readings
+        sensor_match = self.sensor_pattern.search(line)
+        if sensor_match:
+            try:
+                sensor_id = int(sensor_match.group(1)) - 1
+                distance = float(sensor_match.group(2))
+                if 0 <= sensor_id < 4:
+                    self.sensor_data[sensor_id] = distance
+                    # Update GUI immediately for sensor data
+                    self.root.after(0, self.update_gui_labels)
+                    # Log sensor data occasionally
+                    if distance < 30:  # Only log close objects
+                        sensor_names = ["Front", "Right", "Back", "Left"]
+                        self.log_message(f"📏 {sensor_names[sensor_id]}: {distance:.1f}cm")
+            except ValueError:
+                pass
+                
+    def update_map_from_sensors(self):
+        """Update occupancy map based on current sensor readings"""
+        if not MATPLOTLIB_AVAILABLE:
+            return
+            
+        if not all(isinstance(x, (int, float)) for x in self.robot_pos):
+            return
+            
+        grid_x, grid_y = int(self.robot_pos[0]), int(self.robot_pos[1])
+        
+        # Mark current position as free
+        if 0 <= grid_x < MAP_SIZE and 0 <= grid_y < MAP_SIZE:
+            self.occupancy_map[grid_x, grid_y] = 0
+            
+        # Process each sensor (Front=0°, Right=90°, Back=180°, Left=270°)
+        sensor_angles = [0, 90, 180, 270]
+        
+        for i, (angle_offset, distance) in enumerate(zip(sensor_angles, self.sensor_data)):
+            if distance > 300 or distance < 2:
+                continue
+                
+            absolute_angle = (self.robot_heading + angle_offset) % 360
+            rad = np.radians(absolute_angle)
+            
+            # Trace ray from robot to obstacle
+            max_range = min(distance / GRID_SIZE, 30)
+            
+            for step in np.arange(0.5, max_range, 0.5):
+                ray_x = grid_x + int(step * np.cos(rad))
+                ray_y = grid_y + int(step * np.sin(rad))
+                
+                if 0 <= ray_x < MAP_SIZE and 0 <= ray_y < MAP_SIZE:
+                    if step >= max_range - 1:
+                        self.occupancy_map[ray_x, ray_y] = 1  # Occupied
+                    else:
+                        if self.occupancy_map[ray_x, ray_y] == -1:
+                            self.occupancy_map[ray_x, ray_y] = 0  # Free
+                            
+    def update_gui_labels(self):
+        """Update GUI labels with current robot status"""
+        try:
+            self.position_label.config(text=f"Position: ({self.robot_pos[0]:.1f}, {self.robot_pos[1]:.1f})")
+            self.heading_label.config(text=f"Heading: {self.robot_heading:.1f}°")
+            
+            sensor_names = ["Front", "Right", "Back", "Left"]
+            for i, (name, distance) in enumerate(zip(sensor_names, self.sensor_data)):
+                if distance < 999:
+                    self.sensor_labels[i].config(text=f"{name}: {distance:.1f} cm")
+                else:
+                    self.sensor_labels[i].config(text=f"{name}: -- cm")
+        except:
+            pass
+                
+    def show_map(self):
+        """Display the real-time map"""
+        if not MATPLOTLIB_AVAILABLE:
+            messagebox.showwarning("Map Unavailable", "Matplotlib not installed. Cannot show map.")
+            return
+            
+        self.update_plot()
+        plt.show(block=False)
+        
+        # Start animation for real-time updates
+        if hasattr(self, 'animation'):
+            self.animation.event_source.stop()
+        self.animation = FuncAnimation(self.fig, self.animate, interval=500, blit=False)
+        self.log_message("🗺 Map window opened")
+        
+    def update_plot(self):
+        """Update the map visualization"""
+        if not MATPLOTLIB_AVAILABLE:
+            return
+            
+        # Update map image
+        self.map_image.set_array(self.occupancy_map.T)
+        
+        # Update robot position
+        if self.robot_pos:
+            self.robot_marker.set_data([self.robot_pos[0]], [self.robot_pos[1]])
+            
+            # Draw robot direction arrow
+            arrow_length = 3
+            dx = arrow_length * np.cos(np.radians(self.robot_heading))
+            dy = arrow_length * np.sin(np.radians(self.robot_heading))
+            self.robot_direction.set_data([self.robot_pos[0], self.robot_pos[0] + dx],
+                                        [self.robot_pos[1], self.robot_pos[1] + dy])
+        
+        # Update path
+        if len(self.path_history) > 1:
+            path_x, path_y = zip(*self.path_history)
+            self.path_line.set_data(path_x, path_y)
+            
+        # Update sensor rays
+        if self.robot_pos and MATPLOTLIB_AVAILABLE:
+            sensor_angles = [0, 90, 180, 270]
+            colors = ['red', 'green', 'blue', 'orange']
+            
+            for i, (angle_offset, distance, line) in enumerate(zip(sensor_angles, self.sensor_data, self.sensor_lines)):
+                if distance < 300 and distance > 2:
+                    absolute_angle = (self.robot_heading + angle_offset) % 360
+                    rad = np.radians(absolute_angle)
+                    
+                    end_x = self.robot_pos[0] + (distance / GRID_SIZE) * np.cos(rad)
+                    end_y = self.robot_pos[1] + (distance / GRID_SIZE) * np.sin(rad)
+                    
+                    line.set_data([self.robot_pos[0], end_x], [self.robot_pos[1], end_y])
+                    line.set_color(colors[i])
+                else:
+                    line.set_data([], [])
+                    
+    def animate(self, frame):
+        """Animation function for real-time map updates"""
+        try:
+            if MATPLOTLIB_AVAILABLE:
+                self.update_plot()
+                return [self.map_image, self.robot_marker, self.robot_direction, self.path_line] + self.sensor_lines
+            return []
+        except:
+            return []
+        
+    def clear_map(self):
+        """Clear the current map"""
+        if MATPLOTLIB_AVAILABLE:
+            self.occupancy_map.fill(-1)
+        else:
+            self.occupancy_map = [[-1 for _ in range(MAP_SIZE)] for _ in range(MAP_SIZE)]
+        
+        self.path_history.clear()
+        self.log_message("🗺 Map cleared")
+        
+    def save_map(self):
+        """Save the current map and robot data"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"robot_map_{timestamp}.json"
+        
+        # Convert numpy array to list if needed
+        if MATPLOTLIB_AVAILABLE:
+            map_data_list = self.occupancy_map.tolist()
+        else:
+            map_data_list = self.occupancy_map
+            
+        map_data = {
+            'timestamp': timestamp,
+            'map_size': MAP_SIZE,
+            'grid_size': GRID_SIZE,
+            'occupancy_map': map_data_list,
+            'robot_position': self.robot_pos,
+            'robot_heading': self.robot_heading,
+            'path_history': self.path_history,
+            'sensor_data': self.sensor_data,
+            'mapping_active': self.mapping_active
+        }
+        
+        try:
+            with open(filename, 'w') as f:
+                json.dump(map_data, f, indent=2)
+            self.log_message(f"💾 Map saved: {filename}")
+            messagebox.showinfo("Save Map", f"Map saved successfully as {filename}")
+        except Exception as e:
+            self.log_message(f"✗ Save error: {e}")
+            messagebox.showerror("Save Error", f"Failed to save map:\n{str(e)}")
+            
+    def on_key_press(self, event):
+        """Handle keyboard input for manual control"""
+        if not self.connected:
+            return
+            
+        key = event.keysym.lower()
+        command_map = {
+            'w': 'w', 'up': 'w',
+            's': 's', 'down': 's', 
+            'a': 'a', 'left': 'a',
+            'd': 'd', 'right': 'd',
+            'space': 'x'
+        }
+        
+        if key in command_map:
+            self.send_command(command_map[key])
+        elif key == 'm':
+            if self.mapping_active:
+                self.stop_autonomous_mapping()
+            else:
+                self.start_autonomous_mapping()
+                
+    def on_closing(self):
+        """Handle window closing"""
+        self.log_message("🔄 Shutting down...")
+        self.running = False
+        
+        if self.connected:
+            self.disconnect()
+            
+        if MATPLOTLIB_AVAILABLE and hasattr(self, 'animation'):
+            self.animation.event_source.stop()
+            plt.close('all')
+            
+        self.root.destroy()
+        
+    def run(self):
+        """Start the GUI application"""
+        print("=" * 50)
+        print("  Autonomous Robot Mapping Controller")
+        print("  Robot Contest 2025 [Robot Team]")
+        print("=" * 50)
+        print("Features:")
+        print("✓ ESP32 ESP-NOW Communication")
+        print("✓ Real-time Sensor Monitoring")
+        print("✓ Autonomous Mapping")
+        print("✓ Manual Robot Control")
+        if MATPLOTLIB_AVAILABLE:
+            print("✓ Live Map Visualization")
+        else:
+            print("⚠ Map Visualization Disabled (install matplotlib)")
+        print("=" * 50)
+        
+        self.log_message("🚀 Robot Mapping Controller Started")
+        self.log_message("📋 Instructions:")
+        self.log_message("   1. Select COM port and click Connect")
+        self.log_message("   2. Use manual controls or start auto mapping")
+        self.log_message("   3. Press 'Show Map' to view real-time mapping")
+        
+        self.root.mainloop()
+
+def check_dependencies():
+    """Check if required packages are installed"""
+    missing = []
+    
+    try:
+        import serial
+    except ImportError:
+        missing.append("pyserial")
+        
+    if not MATPLOTLIB_AVAILABLE:
+        missing.append("matplotlib")
+        missing.append("numpy")
+    
+    if missing:
+        print("Missing packages:")
+        for pkg in missing:
+            print(f"  - {pkg}")
+        print("\nInstall with: pip install " + " ".join(missing))
+        
+        response = input("\nContinue without visualization? (y/n): ")
+        if response.lower() != 'y':
+            return False
+    
+    return True
+
+if __name__ == "__main__":
+    if not check_dependencies():
+        sys.exit(1)
+        
+    try:
+        controller = AutoMappingController()
+        controller.run()
+    except KeyboardInterrupt:
+        print("\nProgram interrupted by user")
+    except Exception as e:
+        print(f"Error: {e}")
+        input("Press Enter to exit...")
+>>>>>>> Stashed changes

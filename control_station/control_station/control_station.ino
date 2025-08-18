@@ -1,6 +1,7 @@
 #include <WiFi.h>
 #include <esp_now.h>
 
+<<<<<<< Updated upstream
 // Mode selection - choose one
 #define SIMPLE_MODE 0    // เหมือนโค้ดเดิม (keyboard control เท่านั้น)
 #define MAPPING_MODE 1   // ระบบ mapping แบบเต็ม
@@ -137,9 +138,13 @@ void updateMapFromSensors() {
 
 // MAC address of the robot car ESP32
 uint8_t peerAddress[] = {0x48, 0xE7, 0x29, 0xC9, 0xDF, 0x68};
+=======
+// Updated MAC address of the robot car ESP32
+uint8_t robotAddress[] = {0x48, 0xE7, 0x29, 0xC9, 0xDF, 0x68};
+>>>>>>> Stashed changes
 
 typedef struct struct_message {
-  char text[50];
+  char text[100];
 } struct_message;
 
 struct_message incoming;
@@ -147,9 +152,14 @@ struct_message outgoing;
 
 // Callback when data is sent
 void onDataSent(const esp_now_send_info_t *info, esp_now_send_status_t status) {
+<<<<<<< Updated upstream
   Serial.printf("[ESP32] Last Send Status: %s\n",
                 status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
   Serial.flush();
+=======
+  Serial.printf("[STATION] Send Status: %s\n",
+                status == ESP_NOW_SEND_SUCCESS ? "Success" : "Failed");
+>>>>>>> Stashed changes
 }
 
 // Callback when data is received
@@ -157,6 +167,7 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, in
 #if SIMPLE_MODE
   // Simple mode - just print received messages
   memcpy(&incoming, incomingData, sizeof(incoming));
+<<<<<<< Updated upstream
   Serial.printf("[ESP32] Got message: %s\n", incoming.text);
   Serial.flush();
   
@@ -219,6 +230,9 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, in
     Serial.printf("[ESP32] Received unknown message format (length: %d)\n", len);
   }
 #endif
+=======
+  Serial.println("[ROBOT] " + String(incoming.text));
+>>>>>>> Stashed changes
 }
 
 // Initialize ESP-NOW
@@ -232,8 +246,7 @@ void esp_now_begin() {
                 peerAddress[3], peerAddress[4], peerAddress[5]);
 
   if (esp_now_init() != ESP_OK) {
-    Serial.println("[ESP32] Error initializing ESP-NOW");
-    Serial.flush();
+    Serial.println("[STATION] Error initializing ESP-NOW");
     return;
   }
 
@@ -241,23 +254,32 @@ void esp_now_begin() {
   esp_now_register_recv_cb(onDataRecv);
 
   esp_now_peer_info_t peerInfo = {};
-  memcpy(peerInfo.peer_addr, peerAddress, 6);
+  memcpy(peerInfo.peer_addr, robotAddress, 6);
   peerInfo.channel = 0;
   peerInfo.encrypt = false;
 
   if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-    Serial.println("[ESP32] Failed to add peer");
-    Serial.flush();
+    Serial.println("[STATION] Failed to add robot peer");
     return;
   }
   
+<<<<<<< Updated upstream
   Serial.println("✅ ESP-NOW initialized successfully");
+=======
+  Serial.println("[STATION] ESP-NOW initialized successfully");
+>>>>>>> Stashed changes
 }
 
 // Send a command string over ESP-NOW
 void send_command(const char *cmd) {
   snprintf(outgoing.text, sizeof(outgoing.text), "%s", cmd);
-  esp_now_send(peerAddress, (uint8_t *)&outgoing, sizeof(outgoing));
+  esp_err_t result = esp_now_send(robotAddress, (uint8_t *)&outgoing, sizeof(outgoing));
+  
+  if (result == ESP_OK) {
+    Serial.printf("[STATION] Command sent: %s\n", cmd);
+  } else {
+    Serial.printf("[STATION] Send failed: %d\n", result);
+  }
 }
 
 #if MAPPING_MODE
@@ -374,6 +396,7 @@ void resetMap() {
 
 void setup() {
   Serial.begin(115200);
+<<<<<<< Updated upstream
   while (!Serial);
   delay(1000); // Give USB time to enumerate
 
@@ -410,11 +433,42 @@ void loop() {
   unsigned long currentTime = millis();
   
   // Read serial from Python GUI or Serial Monitor
+=======
+  delay(1000);
+  
+  Serial.println("[STATION] =======================================");
+  Serial.println("[STATION] Autonomous Mapping Robot Controller");
+  Serial.println("[STATION] =======================================");
+  Serial.println("[STATION] Commands:");
+  Serial.println("[STATION]   w/W - Forward");
+  Serial.println("[STATION]   s/S - Backward");  
+  Serial.println("[STATION]   a/A - Turn Left");
+  Serial.println("[STATION]   d/D - Turn Right");
+  Serial.println("[STATION]   x/X - Stop");
+  Serial.println("[STATION]   m/M - Start Autonomous Mapping");
+  Serial.println("[STATION]   n/N - Stop Autonomous Mapping");
+  Serial.println("[STATION]   g/G - Get Map Data");
+  Serial.println("[STATION] =======================================");
+  
+  esp_now_begin();
+  
+  // Print MAC address for reference
+  Serial.print("[STATION] Station MAC: ");
+  Serial.println(WiFi.macAddress());
+}
+
+void loop() {
+  // Read commands from Serial (Python controller)
+>>>>>>> Stashed changes
   while (Serial.available()) {
-    char cmd = Serial.read();
-    switch (cmd) {
-      case 'w':
+    String command = Serial.readStringUntil('\n');
+    command.trim();
+    
+    if (command.length() > 0) {
+      // Process command
+      if (command == "w" || command == "W" || command == "forward") {
         send_command("forward");
+<<<<<<< Updated upstream
         Serial.println("📤 Sent: forward");
         break;
       case 's':
@@ -474,4 +528,39 @@ void loop() {
 #endif
 
   delay(10);
+=======
+      }
+      else if (command == "s" || command == "S" || command == "backward") {
+        send_command("backward");
+      }
+      else if (command == "a" || command == "A" || command == "turn_left") {
+        send_command("turn_left");
+      }
+      else if (command == "d" || command == "D" || command == "turn_right") {
+        send_command("turn_right");
+      }
+      else if (command == "x" || command == "X" || command == "stop") {
+        send_command("stop");
+      }
+      else if (command == "m" || command == "M" || command == "start_mapping") {
+        send_command("start_mapping");
+        Serial.println("[STATION] Starting autonomous mapping mode");
+      }
+      else if (command == "n" || command == "N" || command == "stop_mapping") {
+        send_command("stop_mapping");
+        Serial.println("[STATION] Stopping autonomous mapping mode");
+      }
+      else if (command == "g" || command == "G" || command == "get_map") {
+        send_command("get_map");
+        Serial.println("[STATION] Requesting map data");
+      }
+      else {
+        // Forward any other command directly
+        send_command(command.c_str());
+      }
+    }
+  }
+  
+  delay(10);  // Small delay to prevent overwhelming the serial
+>>>>>>> Stashed changes
 }

@@ -1,10 +1,28 @@
+<<<<<<< Updated upstream
 // robot_main.ino - ไฟล์หลักของหุ่นยนต์
+=======
+/*
+ * Autonomous Robot Mapping System - Robot Main Code
+ * Robot Contest 2025 [Robot Team]
+ * 
+ * IMPORTANT: This is a SINGLE file that replaces ALL separate .ino files
+ * Delete these files from robot_main folder:
+ * - esp_now_controller.ino
+ * - gyro_controller.ino  
+ * - interrupt_controller.ino
+ * - motor_controller.ino
+ * 
+ * Keep ONLY this robot_main.ino file!
+ */
+
+>>>>>>> Stashed changes
 #include <WiFi.h>
 #include <esp_now.h>
 #include <BMI160Gen.h>
 #include <ESP32Servo.h>
 #include "../config/robot_config.h"  // Fixed include path
 
+<<<<<<< Updated upstream
 // ==================== GLOBAL VARIABLES ====================
 // Global variables from config
 MapCell localMap[LOCAL_MAP_SIZE][LOCAL_MAP_SIZE];
@@ -27,11 +45,84 @@ uint16_t obstaclesFound = 0;
 volatile unsigned long echo_start[4] = {0, 0, 0, 0};
 volatile unsigned long echo_end[4] = {0, 0, 0, 0};
 volatile bool echo_done[4] = {false, false, false, false};
+=======
+// ====== Configuration ======
+#define MAP_SIZE 100
+#define GRID_SIZE 10
+#define OBSTACLE_THRESHOLD 15.0
+#define WALL_FOLLOW_DISTANCE 20.0
+
+// ====== MAC Address - Update this to match your control station ======
+uint8_t controllerAddress[] = {0x7c, 0x87, 0xce, 0x2f, 0xe3, 0x20};
+
+// ====== Gyro Constants ======
+static const float GYRO_LSB_PER_DPS = 131.2f;
+static const float KP = 1.8f;
+static const float KD = 0.0f;
+static const uint8_t MAX_PWM = 255;
+
+// ====== Pin Definitions ======
+#define TRIG_PIN   32
+#define BUTTON_PIN 27
+#define BUZZER_PIN 14
+#define IMU_I2C_ADDR 0x69
+
+// Motor pins
+#define MOTOR_FRONT_A1 19
+#define MOTOR_FRONT_A2 18
+#define MOTOR_FRONT_B1 33
+#define MOTOR_FRONT_B2 23
+#define MOTOR_BACK_A1 4
+#define MOTOR_BACK_A2 13
+#define MOTOR_BACK_B1 16
+#define MOTOR_BACK_B2 17
+
+#define SERVO_PIN1 26
+#define SERVO_PIN2 25
+
+// Ultrasonic pins
+#define ECHO1_PIN  39  // Front
+#define ECHO2_PIN  34  // Right
+#define ECHO3_PIN  36  // Back
+#define ECHO4_PIN  35  // Left
+
+#define SOUND_SPEED 0.0343
+
+// ====== Global Variables ======
+volatile float yaw_deg = 0.0f;
+volatile float gyro_z_bias = 0.0f;
+unsigned long last_imu_us = 0;
+
+bool straight_active = false;
+float target_yaw_deg = 0.0f;
+uint8_t base_forward_pwm = 0;
+float prev_err = 0.0f;
+
+// Mapping variables
+int8_t occupancy_map[MAP_SIZE][MAP_SIZE];
+float robot_x = MAP_SIZE/2;
+float robot_y = MAP_SIZE/2;
+float robot_heading = 0.0;
+
+bool mapping_mode = false;
+unsigned long last_mapping_update = 0;
+
+// Ultrasonic data
+volatile unsigned long echo_start[4] = {0, 0, 0, 0};
+volatile unsigned long echo_end[4] = {0, 0, 0, 0};
+volatile bool echo_done[4] = {false, false, false, false};
+float sensor_distances[4] = {999.0, 999.0, 999.0, 999.0};
+
+const int MOTOR_SPEED = 60;
+unsigned long lastTriggerTime = 0;
+unsigned long lastCommandTime = 0;
+>>>>>>> Stashed changes
 
 // Hardware objects
 Servo servo_left;
 Servo servo_right;
 
+<<<<<<< Updated upstream
 // Timing variables
 unsigned long lastTriggerTime = 0;
 unsigned long lastMotorUpdate = 0;
@@ -1312,4 +1403,529 @@ void tone(int pin, int frequency, int duration) {
     digitalWrite(pin, LOW);
     delayMicroseconds(period / 2);
   }
+=======
+// ESP-NOW Communication
+typedef struct struct_message {
+  char text[100];
+} struct_message;
+
+struct_message incoming;
+struct_message outgoing;
+
+// ====== Helper Functions ======
+static inline uint8_t pct_to_pwm(int p) { 
+  p = constrain(p, 0, 100); 
+  return (uint8_t)(p * 255 / 100); 
+}
+
+float safe_min(float a, float b) {
+  return (a < b) ? a : b;
+}
+
+// ====== Function Prototypes ======
+void calibrate_gyro_bias(uint16_t samples = 200);
+void imu_update_yaw();
+void straight_start(int speed_percent);
+void straight_stop();
+void straight_update();
+void moveForward();
+void turnLeft();
+void turnRight();
+void stop_motor();
+void moveBackward(int speed_percent);
+void esp_now_begin();
+void ultrasonic_begin();
+void motor_begin();
+void initializeMap();
+void updateMap();
+void sendMapData();
+void autonomousMapping();
+
+// ====== Mapping Functions ======
+void initializeMap() {
+  for (int i = 0; i < MAP_SIZE; i++) {
+    for (int j = 0; j < MAP_SIZE; j++) {
+      occupancy_map[i][j] = -1;
+    }
+  }
+  Serial.println("[MAPPING] Map initialized");
+}
+
+void updateMap() {
+  int grid_x = (int)(robot_x);
+  int grid_y = (int)(robot_y);
+  
+  if (grid_x >= 0 && grid_x < MAP_SIZE && grid_y >= 0 && grid_y < MAP_SIZE) {
+    occupancy_map[grid_x][grid_y] = 0;
+  }
+  
+  float sensor_angles[] = {0, 90, 180, 270};
+  
+  for (int i = 0; i < 4; i++) {
+    if (sensor_distances[i] < 999.0) {
+      float absolute_angle = robot_heading + sensor_angles[i];
+      if (absolute_angle >= 360) absolute_angle -= 360;
+      if (absolute_angle < 0) absolute_angle += 360;
+      
+      float rad = absolute_angle * PI / 180.0;
+      float max_range = safe_min(sensor_distances[i], 100.0f);
+      
+      for (float dist = GRID_SIZE; dist <= max_range; dist += GRID_SIZE/2) {
+        int obs_x = grid_x + (int)(dist * cos(rad) / GRID_SIZE);
+        int obs_y = grid_y + (int)(dist * sin(rad) / GRID_SIZE);
+        
+        if (obs_x >= 0 && obs_x < MAP_SIZE && obs_y >= 0 && obs_y < MAP_SIZE) {
+          if (dist >= sensor_distances[i] - 5) {
+            occupancy_map[obs_x][obs_y] = 1;
+          } else {
+            if (occupancy_map[obs_x][obs_y] == -1) {
+              occupancy_map[obs_x][obs_y] = 0;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+void sendMapData() {
+  snprintf(outgoing.text, sizeof(outgoing.text), 
+           "POS:%.1f,%.1f,%.1f|S:%.1f,%.1f,%.1f,%.1f", 
+           robot_x, robot_y, robot_heading,
+           sensor_distances[0], sensor_distances[1], 
+           sensor_distances[2], sensor_distances[3]);
+  esp_now_send(controllerAddress, (uint8_t*)&outgoing, sizeof(outgoing));
+}
+
+// ====== Autonomous Navigation ======
+void autonomousMapping() {
+  if (!mapping_mode) return;
+  
+  updateMap();
+  
+  float front_dist = sensor_distances[0];
+  float right_dist = sensor_distances[1];
+  
+  if (front_dist < OBSTACLE_THRESHOLD) {
+    Serial.println("[AUTO] Obstacle ahead, turning left");
+    turnLeft();
+    delay(500);
+    stop_motor();
+  } else if (right_dist > WALL_FOLLOW_DISTANCE * 1.5) {
+    Serial.println("[AUTO] Lost wall, turning right");
+    turnRight();
+    delay(300);
+    stop_motor();
+  } else if (right_dist < WALL_FOLLOW_DISTANCE * 0.5) {
+    Serial.println("[AUTO] Too close to wall, adjusting left");
+    turnLeft();
+    delay(200);
+    stop_motor();
+  } else {
+    moveForward();
+  }
+  
+  // Update robot position
+  static unsigned long last_pos_update = 0;
+  if (millis() - last_pos_update > 100) {
+    last_pos_update = millis();
+    float movement = 0.5;
+    robot_x += movement * cos(robot_heading * PI / 180.0);
+    robot_y += movement * sin(robot_heading * PI / 180.0);
+  }
+}
+
+// ====== Motor Control ======
+void stop_motor() {
+  analogWrite(MOTOR_FRONT_A1, 0);
+  analogWrite(MOTOR_FRONT_A2, 0);
+  analogWrite(MOTOR_FRONT_B1, 0);
+  analogWrite(MOTOR_FRONT_B2, 0);
+  analogWrite(MOTOR_BACK_A1, 0);
+  analogWrite(MOTOR_BACK_A2, 0);
+  analogWrite(MOTOR_BACK_B1, 0);
+  analogWrite(MOTOR_BACK_B2, 0);
+}
+
+void moveForward() {
+  calibrate_gyro_bias();
+  last_imu_us = micros();
+  straight_start(MOTOR_SPEED);
+}
+
+void turnLeft() {
+  straight_stop();
+  target_yaw_deg = robot_heading - 90;
+  if (target_yaw_deg < 0) target_yaw_deg += 360;
+  
+  int duty = ((float)MOTOR_SPEED/100)*255;
+  analogWrite(MOTOR_FRONT_A1, duty);
+  analogWrite(MOTOR_FRONT_A2, 0);
+  analogWrite(MOTOR_FRONT_B1, duty);
+  analogWrite(MOTOR_FRONT_B2, 0);
+  analogWrite(MOTOR_BACK_A1, duty);
+  analogWrite(MOTOR_BACK_A2, 0);
+  analogWrite(MOTOR_BACK_B1, duty);
+  analogWrite(MOTOR_BACK_B2, 0);
+}
+
+void turnRight() {
+  straight_stop();
+  target_yaw_deg = robot_heading + 90;
+  if (target_yaw_deg >= 360) target_yaw_deg -= 360;
+  
+  int duty = ((float)MOTOR_SPEED/100)*255;
+  analogWrite(MOTOR_FRONT_A1, 0);
+  analogWrite(MOTOR_FRONT_A2, duty);
+  analogWrite(MOTOR_FRONT_B1, 0);
+  analogWrite(MOTOR_FRONT_B2, duty);
+  analogWrite(MOTOR_BACK_A1, 0);
+  analogWrite(MOTOR_BACK_A2, duty);
+  analogWrite(MOTOR_BACK_B1, 0);
+  analogWrite(MOTOR_BACK_B2, duty);
+}
+
+void moveBackward(int speed_percent) {
+  straight_stop();
+  int duty = ((float)speed_percent/100)*255;
+  analogWrite(MOTOR_FRONT_A1, 0);
+  analogWrite(MOTOR_FRONT_A2, duty);
+  analogWrite(MOTOR_FRONT_B1, duty);
+  analogWrite(MOTOR_FRONT_B2, 0);
+  analogWrite(MOTOR_BACK_A1, 0);
+  analogWrite(MOTOR_BACK_A2, duty);
+  analogWrite(MOTOR_BACK_B1, duty);
+  analogWrite(MOTOR_BACK_B2, 0);
+}
+
+// ====== ESP-NOW Callbacks ======
+void onDataSent(const esp_now_send_info_t *info, esp_now_send_status_t status) {
+  // Silent for autonomous mode
+}
+
+void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
+  memcpy(&incoming, incomingData, sizeof(incoming));
+  String command = String(incoming.text);
+  
+  if (command == "start_mapping") {
+    mapping_mode = true;
+    initializeMap();
+    Serial.println("[AUTO] Starting autonomous mapping");
+  } else if (command == "stop_mapping") {
+    mapping_mode = false;
+    stop_motor();
+    Serial.println("[AUTO] Stopping autonomous mapping");
+  } else if (command == "get_map") {
+    sendMapData();
+  } else {
+    mapping_mode = false;
+    
+    if (command == "forward") {
+      moveForward();
+    } else if (command == "backward") {
+      moveBackward(MOTOR_SPEED);
+    } else if (command == "turn_left") {
+      turnLeft();
+    } else if (command == "turn_right") {
+      turnRight();
+    } else {
+      stop_motor();
+      straight_stop();
+    }
+  }
+  lastCommandTime = millis();
+}
+
+// ====== Ultrasonic Interrupts ======
+void IRAM_ATTR echo1ISR() {
+  if (digitalRead(ECHO1_PIN)) {
+    echo_start[0] = micros();
+  } else {
+    echo_end[0] = micros();
+    echo_done[0] = true;
+  }
+}
+
+void IRAM_ATTR echo2ISR() {
+  if (digitalRead(ECHO2_PIN)) {
+    echo_start[1] = micros();
+  } else {
+    echo_end[1] = micros();
+    echo_done[1] = true;
+  }
+}
+
+void IRAM_ATTR echo3ISR() {
+  if (digitalRead(ECHO3_PIN)) {
+    echo_start[2] = micros();
+  } else {
+    echo_end[2] = micros();
+    echo_done[2] = true;
+  }
+}
+
+void IRAM_ATTR echo4ISR() {
+  if (digitalRead(ECHO4_PIN)) {
+    echo_start[3] = micros();
+  } else {
+    echo_end[3] = micros();
+    echo_done[3] = true;
+  }
+}
+
+// ====== Initialization ======
+void esp_now_begin() {
+  WiFi.mode(WIFI_STA);
+  
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("[ESP32] Error initializing ESP-NOW");
+    return;
+  }
+  
+  esp_now_register_send_cb(onDataSent);
+  esp_now_register_recv_cb(onDataRecv);
+  
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, controllerAddress, 6);
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+  
+  if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+    Serial.println("[ESP32] Failed to add peer");
+    return;
+  }
+  
+  Serial.println("[ESP32] ESP-NOW initialized");
+}
+
+void ultrasonic_begin() {
+  pinMode(TRIG_PIN, OUTPUT);
+  digitalWrite(TRIG_PIN, LOW);
+  pinMode(ECHO1_PIN, INPUT);
+  pinMode(ECHO2_PIN, INPUT);
+  pinMode(ECHO3_PIN, INPUT);
+  pinMode(ECHO4_PIN, INPUT);
+  
+  attachInterrupt(digitalPinToInterrupt(ECHO1_PIN), echo1ISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ECHO2_PIN), echo2ISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ECHO3_PIN), echo3ISR, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(ECHO4_PIN), echo4ISR, CHANGE);
+}
+
+void motor_begin() {
+  servo_left.attach(SERVO_PIN1);
+  servo_right.attach(SERVO_PIN2);
+  
+  pinMode(MOTOR_FRONT_A1, OUTPUT);
+  pinMode(MOTOR_FRONT_A2, OUTPUT);
+  pinMode(MOTOR_FRONT_B1, OUTPUT);
+  pinMode(MOTOR_FRONT_B2, OUTPUT);
+  pinMode(MOTOR_BACK_A1, OUTPUT);
+  pinMode(MOTOR_BACK_A2, OUTPUT);
+  pinMode(MOTOR_BACK_B1, OUTPUT);
+  pinMode(MOTOR_BACK_B2, OUTPUT);
+  
+  stop_motor();
+}
+
+// ====== Gyro Functions ======
+void calibrate_gyro_bias(uint16_t samples) {
+  long sum = 0;
+  for (uint16_t i = 0; i < samples; i++) {
+    int gx, gy, gz;
+    BMI160.readGyro(gx, gy, gz);
+    sum += gz;
+    delay(2);
+  }
+  gyro_z_bias = sum / (float)samples;
+}
+
+inline void imu_update_yaw() {
+  int gx, gy, gz;
+  BMI160.readGyro(gx, gy, gz);
+  
+  unsigned long now = micros();
+  if (last_imu_us == 0) { 
+    last_imu_us = now; 
+    return; 
+  }
+  float dt = (now - last_imu_us) * 1e-6f;
+  last_imu_us = now;
+  
+  float rate_dps = (gz - gyro_z_bias) / GYRO_LSB_PER_DPS;
+  yaw_deg += rate_dps * dt;
+  robot_heading = yaw_deg;
+  
+  while (robot_heading >= 360) robot_heading -= 360;
+  while (robot_heading < 0) robot_heading += 360;
+}
+
+void straight_start(int speed_percent) {
+  base_forward_pwm = pct_to_pwm(speed_percent);
+  target_yaw_deg = yaw_deg;
+  prev_err = 0.0f;
+  straight_active = true;
+}
+
+void straight_stop() {
+  straight_active = false;
+  stop_motor();
+}
+
+void straight_update() {
+  if (!straight_active) return;
+  
+  imu_update_yaw();
+  
+  float err = target_yaw_deg - yaw_deg;
+  float derr = err - prev_err;
+  prev_err = err;
+  
+  float corr = KP * err + KD * derr;
+  float max_delta = base_forward_pwm * 0.6f;
+  corr = constrain(corr, -max_delta, max_delta);
+  
+  int left_pwm = constrain((int)base_forward_pwm + (int)corr, 0, MAX_PWM);
+  int right_pwm = constrain((int)base_forward_pwm - (int)corr, 0, MAX_PWM);
+  
+  // Set motor PWM
+  analogWrite(MOTOR_FRONT_A1, left_pwm);
+  analogWrite(MOTOR_FRONT_A2, 0);
+  analogWrite(MOTOR_FRONT_B1, 0);
+  analogWrite(MOTOR_FRONT_B2, right_pwm);
+  analogWrite(MOTOR_BACK_A1, left_pwm);
+  analogWrite(MOTOR_BACK_A2, 0);
+  analogWrite(MOTOR_BACK_B1, 0);
+  analogWrite(MOTOR_BACK_B2, right_pwm);
+}
+
+// ====== Setup Function ======
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  
+  Serial.println("========================================");
+  Serial.println("  Autonomous Robot Mapping System");
+  Serial.println("  Robot Contest 2025 [Robot Team]");
+  Serial.println("========================================");
+  
+  // Initialize IMU
+  Serial.println("[SETUP] Initializing BMI160...");
+  BMI160.begin(BMI160GenClass::I2C_MODE, IMU_I2C_ADDR);
+  uint8_t dev_id = BMI160.getDeviceID();
+  Serial.printf("[IMU] Device ID: 0x%02X\n", dev_id);
+  if (dev_id == 0xD1) {
+    Serial.println("[IMU] BMI160 detected successfully!");
+  } else {
+    Serial.println("[IMU] WARNING: BMI160 not detected!");
+  }
+  BMI160.setGyroRange(250);
+  
+  // Initialize hardware
+  Serial.println("[SETUP] Initializing hardware...");
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT);
+  digitalWrite(BUZZER_PIN, LOW);
+  
+  motor_begin();
+  ultrasonic_begin();
+  esp_now_begin();
+  
+  // Initialize mapping
+  Serial.println("[SETUP] Initializing mapping system...");
+  initializeMap();
+  
+  // Calibrate gyro
+  Serial.println("[SETUP] Calibrating gyroscope... (keep robot still)");
+  calibrate_gyro_bias();
+  last_imu_us = micros();
+  
+  // Print MAC address for debugging
+  Serial.print("[SETUP] Robot MAC Address: ");
+  Serial.println(WiFi.macAddress());
+  
+  Serial.println("========================================");
+  Serial.println("[READY] Robot initialized successfully!");
+  Serial.println("[READY] Waiting for commands...");
+  Serial.println("Commands:");
+  Serial.println("  'start_mapping' - Begin autonomous mapping");
+  Serial.println("  'stop_mapping'  - Stop autonomous mapping");
+  Serial.println("  'forward'       - Move forward");
+  Serial.println("  'backward'      - Move backward");
+  Serial.println("  'turn_left'     - Turn left");
+  Serial.println("  'turn_right'    - Turn right");
+  Serial.println("========================================");
+}
+
+// ====== Main Loop ======
+void loop() {
+  unsigned long now = millis();
+  
+  // Update IMU continuously
+  imu_update_yaw();
+  straight_update();
+  
+  // Trigger ultrasonic sensors every 60ms
+  if (now - lastTriggerTime >= 60) {
+    lastTriggerTime = now;
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
+  }
+  
+  // Process ultrasonic measurements
+  for (int i = 0; i < 4; i++) {
+    if (echo_done[i]) {
+      noInterrupts();
+      unsigned long duration = echo_end[i] - echo_start[i];
+      echo_done[i] = false;
+      interrupts();
+      
+      sensor_distances[i] = (duration * SOUND_SPEED) / 2.0;
+      if (sensor_distances[i] > 300 || sensor_distances[i] < 2) {
+        sensor_distances[i] = 999.0;  // Invalid reading
+      }
+      
+      // Send sensor data to serial (for debugging and Python controller)
+      Serial.print("Sensor ");
+      Serial.print(i + 1);
+      Serial.print(": ");
+      Serial.print(sensor_distances[i]);
+      Serial.println(" cm");
+    }
+  }
+  
+  // Autonomous mapping logic
+  if (mapping_mode && now - last_mapping_update >= 200) {
+    last_mapping_update = now;
+    autonomousMapping();
+  }
+  
+  // Send status data every second
+  static unsigned long lastStatus = 0;
+  if (now - lastStatus >= 1000) {
+    lastStatus = now;
+    if (mapping_mode) {
+      sendMapData();
+    }
+    
+    // Status debug info
+    Serial.printf("[STATUS] Pos:(%.1f,%.1f) Heading:%.1f° Mode:%s\n", 
+                  robot_x, robot_y, robot_heading, 
+                  mapping_mode ? "AUTO" : "MANUAL");
+  }
+  
+  // Emergency stop if no command for 5 seconds in manual mode
+  if (!mapping_mode && (now - lastCommandTime > 5000)) {
+    stop_motor();
+    straight_stop();
+  }
+  
+  // Button and buzzer test
+  int button_status = digitalRead(BUTTON_PIN);
+  digitalWrite(BUZZER_PIN, !button_status);
+  
+  // Small delay to prevent overwhelming the system
+  delay(10);
+>>>>>>> Stashed changes
 }
