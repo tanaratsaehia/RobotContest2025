@@ -1,9 +1,14 @@
 #include <WiFi.h>
 #include <esp_now.h>
 
+<<<<<<< Updated upstream
 // ==================== CONFIGURATION ====================
 #define SERIAL_BAUD 115200
 #define DEBUG_MODE 1
+=======
+// MAC of the robot car ESP32 - UPDATED ADDRESS
+uint8_t peerAddress[] = {0x48, 0xE7, 0x29, 0xC9, 0xDF, 0x68};
+>>>>>>> Stashed changes
 
 <<<<<<< Updated upstream
 // Robot MAC address
@@ -105,6 +110,7 @@ enum ControlMode {
 
 ControlMode current_mode = MANUAL_CONTROL;
 
+<<<<<<< Updated upstream
 // Callback when data is sent
 void onDataSent(const wifi_tx_info_t *info, esp_now_send_status_t status) {
   Serial.print("Send Status: ");
@@ -123,6 +129,54 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   Serial.print(" -> ");
   Serial.write(data, len);
   Serial.println();
+>>>>>>> Stashed changes
+=======
+// Callback when data is sent - FIXED SIGNATURE
+void onDataSent(const wifi_tx_info_t *tx_info, esp_now_send_status_t status)  {
+  Serial.printf("[ESP32] Last Send Status: %s\n",
+                status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+}
+
+// Callback when data is received - FIXED SIGNATURE
+void onDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData, int len) {
+  memcpy(&incoming, incomingData, sizeof(incoming));
+  Serial.println("[ESP32] Got message: " + String(incoming.text));
+  
+  // Process mapping and navigation data
+  process_robot_data(incoming.text);
+}
+
+// Process data from robot
+void process_robot_data(const char* data) {
+  if (strncmp(data, "POS:", 4) == 0) {
+    // Robot position data: "POS:x,y,angle"
+    float x, y, angle;
+    if (sscanf(data + 4, "%f,%f,%f", &x, &y, &angle) == 3) {
+      Serial.printf("[MAP] Robot position: (%.1f, %.1f) angle: %.1f°\n", x, y, angle);
+    }
+  } else if (strncmp(data, "OBS:", 4) == 0) {
+    // Obstacle data: "OBS:x,y"
+    int x, y;
+    if (sscanf(data + 4, "%d,%d", &x, &y) == 2) {
+      Serial.printf("[MAP] Obstacle detected at grid: (%d, %d)\n", x, y);
+    }
+  } else if (strncmp(data, "NAV_POS:", 8) == 0) {
+    // Navigation position: "NAV_POS:x,y,angle"
+    float x, y, angle;
+    if (sscanf(data + 8, "%f,%f,%f", &x, &y, &angle) == 3) {
+      Serial.printf("[NAV] Position: (%.1f, %.1f) angle: %.1f°\n", x, y, angle);
+    }
+  } else if (strncmp(data, "NAV_WP:", 7) == 0) {
+    // Navigation waypoint: "NAV_WP:id,x,y,distance"
+    int id;
+    float x, y, distance;
+    if (sscanf(data + 7, "%d,%f,%f,%f", &id, &x, &y, &distance) == 4) {
+      Serial.printf("[NAV] Waypoint %d: (%.1f, %.1f) distance: %.1f cm\n", id, x, y, distance);
+    }
+  } else if (strncmp(data, "Sensor", 6) == 0) {
+    // Sensor data - keep existing format
+    Serial.println("[SENSOR] " + String(data));
+  }
 >>>>>>> Stashed changes
 }
 
@@ -554,8 +608,39 @@ void print_menu() {
   Serial.println("=============================\n");
 }
 
+// Print available commands
+void print_help() {
+  Serial.println("\n=== ROBOT CONTROL COMMANDS ===");
+  Serial.println("Manual Control:");
+  Serial.println("  w - Forward");
+  Serial.println("  s - Backward");
+  Serial.println("  a - Turn Left");
+  Serial.println("  d - Turn Right");
+  Serial.println("  x - Stop");
+  Serial.println();
+  Serial.println("Autonomous Mapping:");
+  Serial.println("  m - Start mapping mode");
+  Serial.println("  M - Stop mapping mode");
+  Serial.println();
+  Serial.println("Path Planning:");
+  Serial.println("  n - Start navigation");
+  Serial.println("  N - Stop navigation");
+  Serial.println("  c - Clear waypoints");
+  Serial.println("  l - List waypoints");
+  Serial.println();
+  Serial.println("Pre-defined Paths:");
+  Serial.println("  1 - Load competition path 1");
+  Serial.println("  2 - Load competition path 2");
+  Serial.println();
+  Serial.println("Other:");
+  Serial.println("  h - Show this help");
+  Serial.println("  + - Add sample waypoint (100,0)");
+  Serial.println("================================\n");
+}
+
 void setup() {
   Serial.begin(115200);
+<<<<<<< Updated upstream
   while (!Serial);
   delay(1000);
   
@@ -575,17 +660,61 @@ void loop() {
       // ===== MANUAL CONTROL =====
       case 'w':
         send_command("forward", 0, 0, MANUAL_CONTROL);
+=======
+  delay(1000); // Give USB time to enumerate
+  
+  Serial.println("\n=== ESP32 Advanced Robot Control Station ===");
+  Serial.println("Initializing ESP-NOW...");
+  
+  esp_now_begin();
+  
+  Serial.println("Control Station Ready!");
+  print_help();
+  
+  Serial.println("Waiting for commands...");
+}
+
+void loop() {
+  // Read serial commands from computer/Python GUI
+  while (Serial.available()) {
+    char cmd = Serial.read();
+    
+    // Skip newline and carriage return
+    if (cmd == '\n' || cmd == '\r') {
+      continue;
+    }
+    
+    Serial.print("Command sent: ");
+    Serial.println(cmd);
+    
+    switch (cmd) {
+      // Basic movement commands
+      case 'w':
+        send_command("forward");
+        Serial.println("[CMD] Forward");
+>>>>>>> Stashed changes
         break;
         
       case 's':
+<<<<<<< Updated upstream
         send_command("backward", 0, 0, MANUAL_CONTROL);
+=======
+        send_command("backward");
+        Serial.println("[CMD] Backward");
+>>>>>>> Stashed changes
         break;
         
       case 'a':
+<<<<<<< Updated upstream
         send_command("turn_left", 0, 0, MANUAL_CONTROL);
+=======
+        send_command("turn_left");
+        Serial.println("[CMD] Turn Left");
+>>>>>>> Stashed changes
         break;
         
       case 'd':
+<<<<<<< Updated upstream
         send_command("turn_right", 0, 0, MANUAL_CONTROL);
         break;
         
@@ -638,15 +767,84 @@ void loop() {
         if (cmd != '\n' && cmd != '\r') {
           Serial.printf("Unknown command: %c (press 'h' for help)\n", cmd);
         }
+=======
+        send_command("turn_right");
+        Serial.println("[CMD] Turn Right");
+        break;
+      case 'x':
+        send_command("stop");
+        Serial.println("[CMD] Stop");
+        break;
+      
+      // Mapping commands
+      case 'm':
+        send_command("start_mapping");
+        Serial.println("[CMD] Start Mapping");
+        break;
+      case 'M':
+        send_command("stop_mapping");
+        Serial.println("[CMD] Stop Mapping");
+        break;
+      
+      // Navigation commands
+      case 'n':
+        send_command("wp_start");
+        Serial.println("[CMD] Start Navigation");
+        break;
+      case 'N':
+        send_command("wp_stop");
+        Serial.println("[CMD] Stop Navigation");
+        break;
+      
+      // Waypoint management
+      case 'c':
+        send_command("wp_clear");
+        Serial.println("[CMD] Clear Waypoints");
+        break;
+      case 'l':
+        send_command("wp_list");
+        Serial.println("[CMD] List Waypoints");
+        break;
+      
+      // Pre-defined paths
+      case '1':
+        send_command("load_path_1");
+        Serial.println("[CMD] Load Competition Path 1");
+        break;
+      case '2':
+        send_command("load_path_2");
+        Serial.println("[CMD] Load Competition Path 2");
+        break;
+      
+      // Add sample waypoint
+      case '+':
+        send_command("wp_add:100,0");
+        Serial.println("[CMD] Add waypoint (100,0)");
+        break;
+      
+      // Help
+      case 'h':
+        print_help();
+        break;
+      
+      // Unknown command
+      default:
+        Serial.println("[CMD] Unknown command. Press 'h' for help.");
+>>>>>>> Stashed changes
         break;
     }
   }
   
+<<<<<<< Updated upstream
   // Auto-request status updates during autonomous mode
   static unsigned long last_status_request = 0;
   if (current_mode == AUTONOMOUS_MAPPING && millis() - last_status_request > 5000) {
     last_status_request = millis();
     send_command("get_status", 0, 0, MONITORING);
   }
+>>>>>>> Stashed changes
+=======
+  // Small delay to prevent overwhelming the serial buffer
+  delay(10);
 >>>>>>> Stashed changes
 }
