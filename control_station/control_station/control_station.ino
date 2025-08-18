@@ -82,6 +82,12 @@ void loop() {
       case 'd':
         send_command("turn_right");
         break;
+      case 'e':
+        send_command("release_obj");
+        break;
+      case 'r':
+        send_command("honk");
+        break;
       default:
         send_command("");
         break;

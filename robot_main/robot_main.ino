@@ -140,11 +140,13 @@ void loop() {
   if (!button_status && now - lastMotorUpdate >= 500){
     lastMotorUpdate = now;
     if (servo_state) {
-      servo_left.write(180);
-      servo_right.write(180);
+      Serial.println("Servo: 90");
+      servo_left.write(90);
+      servo_right.write(90);
     }else{
-      servo_left.write(0);
-      servo_right.write(0);
+      Serial.println("Servo: 0");
+      servo_left.write(10);
+      servo_right.write(10);
     }
     servo_state = !servo_state;
   }

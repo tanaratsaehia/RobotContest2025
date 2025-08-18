@@ -11,7 +11,7 @@
 #define SERVO_PIN1 26
 #define SERVO_PIN2 25
 
-const int MOTOR_SPEED = 90; // 0-100 %
+const int MOTOR_SPEED = 40; // 0-100 %
 const float TURN_FORWARD_RATIO = 0.45;
 
 void motor_begin(){
@@ -74,29 +74,43 @@ void move_motor(int action){
 void move_motor_with_command(const char* command){
   if (strcmp(command, "forward") == 0) {
     Serial.println("MOVE MOTOR FORWARD");
-    // move_forward(MOTOR_SPEED);
-    calibrate_gyro_bias();      // <— add this
-    last_imu_us = micros();
-    straight_start(MOTOR_SPEED);
+    digitalWrite(BUZZER_PIN, LOW);
+    move_forward(MOTOR_SPEED);
+    // calibrate_gyro_bias();      // <— add this
+    // last_imu_us = micros();
+    // straight_start(MOTOR_SPEED);
   } else if (strcmp(command, "backward") == 0) {
     Serial.println("MOVE MOTOR BACKWARD");
     move_backward(MOTOR_SPEED);
+    digitalWrite(BUZZER_PIN, LOW);
   } else if (strcmp(command, "turn_left") == 0) {
     Serial.println("MOVE MOTOR TURN LEFT");
     // turn_left(MOTOR_SPEED);
     turn_left_backward(MOTOR_SPEED);
+    digitalWrite(BUZZER_PIN, LOW);
     // turn_left_forward(MOTOR_SPEED);
   } else if (strcmp(command, "turn_right") == 0) {
     Serial.println("MOVE MOTOR TURN LEFT");
     // turn_right(MOTOR_SPEED);
     turn_right_backward(MOTOR_SPEED);
-    // turn_right_forward(MOTOR_SP[EED);
-  } else {
+    digitalWrite(BUZZER_PIN, LOW);
+    // turn_right_forward(MOTOR_SPEED);
+  } else if (strcmp(command, "release_obj") == 0){
+    servo_right.write(100);
+    servo_left.write(100);
+    delay(400);
+    servo_right.write(10);
+    servo_left.write(10);
+    digitalWrite(BUZZER_PIN, LOW);
+  } else if (strcmp(command, "honk") == 0){
+    digitalWrite(BUZZER_PIN, HIGH);
+  }else {
     Serial.println("STOP MOTOR");
     stop_motor();
     straight_stop();
     Serial.print("Unknown command: ");
     Serial.println(command);
+    digitalWrite(BUZZER_PIN, LOW);
   }
 }
 
